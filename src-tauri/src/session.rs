@@ -40,13 +40,16 @@ impl TokenUsage {
     pub fn add(&mut self, input: u64, output: u64, model: &str) {
         self.input_tokens += input;
         self.output_tokens += output;
-        // Approximate pricing per 1M tokens
+        // Approximate pricing per 1M tokens (input, output), as of June 2026.
+        // Specific matches must come before the generic `opus`/`sonnet` fallbacks.
         let (input_rate, output_rate) = match model {
-            m if m.contains("opus-4-7") => (5.0, 25.0),
-            m if m.contains("opus") => (15.0, 75.0),
-            m if m.contains("sonnet") => (3.0, 15.0),
-            m if m.contains("haiku") => (0.80, 4.0),
-            _ => (3.0, 15.0), // default to sonnet pricing
+            m if m.contains("fable") => (10.0, 50.0),       // Fable 5
+            m if m.contains("opus-4-8") => (5.0, 25.0),     // Opus 4.8
+            m if m.contains("opus-4-7") => (5.0, 25.0),     // Opus 4.7
+            m if m.contains("opus") => (15.0, 75.0),        // older Opus (4.6 and earlier)
+            m if m.contains("sonnet") => (3.0, 15.0),       // Sonnet 4.x
+            m if m.contains("haiku") => (1.0, 5.0),         // Haiku 4.5
+            _ => (3.0, 15.0),                               // default to sonnet pricing
         };
         self.total_cost_usd += (input as f64 / 1_000_000.0) * input_rate
             + (output as f64 / 1_000_000.0) * output_rate;

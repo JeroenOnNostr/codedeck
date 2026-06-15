@@ -1,6 +1,6 @@
 export type SessionState = 'idle' | 'running' | 'waiting_permission' | 'completed' | 'error';
 export type AgentMode = 'default' | 'acceptEdits' | 'plan';
-export type EffortLevel = 'low' | 'medium' | 'high' | 'max' | 'auto';
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 export type OutputType = 'action' | 'diff' | 'message' | 'text' | 'error' | 'system' | 'tool_use' | 'tool_result' | 'user_message' | 'token_usage';
 export type GitSyncStatus = 'synced' | 'pending_push' | 'push_failed' | 'never_pushed';
 
@@ -56,6 +56,7 @@ export interface AppConfig {
   show_session_metadata: boolean;
   show_mode_badge: boolean;
   show_commit_badge: boolean;
+  show_model_badge: boolean;
 }
 
 // --- Quick Prompts ---
@@ -121,6 +122,7 @@ export interface RemoteSessionInfo {
   hasTerminal?: boolean;
   permissionMode?: AgentMode;
   effortLevel?: EffortLevel;
+  model?: string;
   committed?: boolean;
   state?: 'idle' | 'running' | 'waiting_permission' | 'waiting_question';
 }
@@ -133,7 +135,7 @@ export interface RemoteOutputEntry {
 }
 
 export type BridgeInboundMessage =
-  | { type: 'sessions'; machine: string; sessions: RemoteSessionInfo[]; authStatus?: AuthStatus }
+  | { type: 'sessions'; machine: string; sessions: RemoteSessionInfo[]; authStatus?: AuthStatus; protocolVersion?: number }
   | { type: 'output'; sessionId: string; seq: number; entry: RemoteOutputEntry }
   | { type: 'history'; sessionId: string; entries: Array<{ seq: number; entry: RemoteOutputEntry }>; totalEntries: number; fromSeq: number; toSeq: number; chunkIndex?: number; totalChunks?: number; requestId?: string }
   | { type: 'session-pending'; pendingId: string; machine: string; createdAt: string }
@@ -144,6 +146,7 @@ export type BridgeInboundMessage =
   | { type: 'session-replaced'; oldSessionId: string; newSession: RemoteSessionInfo }
   | { type: 'mode-confirmed'; sessionId: string; mode: AgentMode }
   | { type: 'effort-confirmed'; sessionId: string; level: EffortLevel }
+  | { type: 'model-confirmed'; sessionId: string; model: string }
   | { type: 'credentials-ack'; machine: string; success: boolean; hasAnthropicKey: boolean; hasGithubPat: boolean; keyValid?: boolean; error?: string };
 
 export type BridgeOutboundMessage =
@@ -153,8 +156,9 @@ export type BridgeOutboundMessage =
   | { type: 'keypress'; sessionId: string; key: string; context?: 'plan-approval' | 'exit-plan' | 'question' }
   | { type: 'mode'; sessionId: string; mode: AgentMode }
   | { type: 'effort'; sessionId: string; level: EffortLevel }
+  | { type: 'model'; sessionId: string; model: string }
   | { type: 'history-request'; sessionId: string; afterSeq?: number }
-  | { type: 'create-session'; defaultEffort?: EffortLevel }
+  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string }
   | { type: 'refresh-sessions' }
   | { type: 'interrupt'; sessionId: string }
   | { type: 'close-session'; sessionId: string }

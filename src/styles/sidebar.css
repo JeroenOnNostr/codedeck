@@ -153,6 +153,13 @@
   background: rgba(34, 197, 94, 0.12);
 }
 
+.session-card-badge--model {
+  color: var(--accent, var(--text-secondary));
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  padding: 0 3px;
+}
+
 .status-dot {
   width: 10px;
   height: 10px;

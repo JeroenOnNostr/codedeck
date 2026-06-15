@@ -5,6 +5,7 @@ import { useSpeechContext } from '../contexts/SpeechContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { processImageFile } from '../utils/imageUtils';
 import { cycleIndex } from '../utils/cycleIndex';
+import { MODELS, modelLabel } from '../constants/models';
 import QuickPromptBar from './QuickPromptBar';
 import '../styles/input.css';
 
@@ -16,14 +17,17 @@ interface PendingImage {
   sizeBytes: number;
 }
 
-export default function InputBar({ sessionId, mode, effort }: { sessionId: string; mode?: AgentMode; effort?: EffortLevel }) {
+export default function InputBar({ sessionId, mode, effort, model }: { sessionId: string; mode?: AgentMode; effort?: EffortLevel; model?: string }) {
   const [text, setText] = useState('');
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const [sending, setSending] = useState(false);
   const [sendPop, setSendPop] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const setMode = useSessionStore((s) => s.setMode);
   const setEffort = useSessionStore((s) => s.setEffort);
+  const setModel = useSessionStore((s) => s.setModel);
   const pendingRevision = useSessionStore((s) => s.pendingRevisionSession === sessionId);
   const clearPendingRevision = useSessionStore((s) => s.setPendingRevision);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -185,17 +189,21 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
     acceptEdits: 'EDITS',
   };
 
-  const EFFORT_CYCLE: EffortLevel[] = ['auto', 'low', 'medium', 'high', 'max'];
+  const EFFORT_CYCLE: EffortLevel[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
   const EFFORT_LABELS: Record<EffortLevel, string> = {
     auto: 'AUTO',
     low: 'LOW',
     medium: 'MED',
     high: 'HIGH',
+    xhigh: 'XHI',
     max: 'MAX',
   };
 
   const [modeCooldown, setModeCooldown] = useState(false);
   const [effortCooldown, setEffortCooldown] = useState(false);
+  // Tracks whether the user just asked for 'max' mid-session, so we can explain the xhigh downgrade.
+  const [requestedMax, setRequestedMax] = useState(false);
+  const [maxHint, setMaxHint] = useState(false);
 
   const cycleMode = () => {
     if (modeCooldown) return;
@@ -211,10 +219,44 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
     if (effortCooldown || !effort) return;
     const idx = EFFORT_CYCLE.indexOf(effort);
     const next = EFFORT_CYCLE[cycleIndex(idx, EFFORT_CYCLE.length, 1)];
+    setRequestedMax(next === 'max'); // remember intent so we can explain a downgrade
     setEffort(sessionId, next);
     setEffortCooldown(true);
     setTimeout(() => setEffortCooldown(false), 600);
   };
+
+  // Mid-session 'max' is applied as 'xhigh' (the SDK can't set 'max' mid-session — it needs a
+  // fresh session). When the user asked for max but the confirmed level comes back xhigh, show a
+  // brief, honest hint instead of silently relabeling to XHI.
+  useEffect(() => {
+    if (requestedMax && effort === 'xhigh') {
+      setMaxHint(true);
+      setRequestedMax(false);
+      const t = setTimeout(() => setMaxHint(false), 5000);
+      return () => clearTimeout(t);
+    }
+    if (requestedMax && effort === 'max') {
+      // Honored (e.g. confirmed as max) — clear intent, no hint.
+      setRequestedMax(false);
+    }
+  }, [requestedMax, effort]);
+
+  const selectModel = (id: string) => {
+    setModelMenuOpen(false);
+    if (id !== model) setModel(sessionId, id);
+  };
+
+  // Close the model menu on outside click / touch.
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const handler = (e: PointerEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setModelMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [modelMenuOpen]);
 
   const canSend = (text.trim() || pendingImage) && !sending && !bridgeOffline;
 
@@ -256,6 +298,12 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
         </div>
       )}
 
+      {maxHint && (
+        <div className="effort-max-hint">
+          Running at <strong>XHIGH</strong> — true MAX effort applies only to a newly created session.
+        </div>
+      )}
+
       <div className="input-bar">
         <div className="left-controls">
           <button
@@ -281,9 +329,44 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
             {MODE_LABELS[mode ?? 'default']}
           </button>
           {effort !== undefined && (
-            <button className={`effort-btn active${effortCooldown ? ' effort-cooldown' : ''}`} onPointerDown={e => e.preventDefault()} onClick={cycleEffort}>
+            <button
+              className={`effort-btn active${effortCooldown ? ' effort-cooldown' : ''}`}
+              onPointerDown={e => e.preventDefault()}
+              onClick={cycleEffort}
+              title={effort === 'xhigh' ? 'XHIGH — for true MAX, start a new session' : `Effort: ${EFFORT_LABELS[effort]}`}
+            >
               {EFFORT_LABELS[effort]}
             </button>
+          )}
+          {model !== undefined && (
+            <div className="model-picker" ref={modelPickerRef}>
+              <button
+                className={`model-btn active${modelMenuOpen ? ' model-menu-open' : ''}`}
+                onPointerDown={e => e.preventDefault()}
+                onClick={() => setModelMenuOpen(o => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={modelMenuOpen}
+                title="Select model"
+              >
+                {modelLabel(model)}
+              </button>
+              {modelMenuOpen && (
+                <div className="model-menu" role="listbox">
+                  {MODELS.map(m => (
+                    <button
+                      key={m.id}
+                      className={`model-menu-item${m.id === model ? ' selected' : ''}`}
+                      role="option"
+                      aria-selected={m.id === model}
+                      onPointerDown={e => e.preventDefault()}
+                      onClick={() => selectModel(m.id)}
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 

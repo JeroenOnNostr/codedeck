@@ -1,5 +1,11 @@
 # Done — Codedeck
 
+## Model & Effort Modernization (2026-06-15, v0.8.0)
+
+- [x] **CD-029: Per-session model selection over the bridge** — Phone can now choose the Claude model for a remote bridge session (previously the model dropdown only affected the local Tauri agent and never reached the bridge). Added `model` to the `create-session`/`model`/`model-confirmed` protocol messages, `remoteSessionModel` store state + `setModel` action, undo-snapshot persistence, and a model picker popup in `InputBar` (`src/constants/models.ts` is the single source of truth). Bridge applies it via `Options.model` at session creation and `query.setModel()` mid-session.
+- [x] **CD-030: Refresh model list + defaults + pricing** — Settings model dropdown now lists Opus 4.8 / Opus 4.7 / Sonnet 4.6 / Haiku 4.5 / Fable 5; default model bumped to `claude-opus-4-8` (TS + Rust + fixed stale config test). Token pricing table in `session.rs` updated to June 2026 rates (Opus 4.8/4.7 $5/$25, Sonnet 4.6 $3/$15, Haiku 4.5 $1/$5, Fable 5 $10/$50).
+- [x] **CD-031: Add `xhigh` effort + model badge** — `EffortLevel` widened with `xhigh` (cycle + Settings dropdown); new `show_model_badge` config (default on) renders a model badge in `SessionHeader` and `Sidebar` mirroring the mode/commit badges.
+
 ## Bug Fixes (2026-03-01)
 
 - [x] **Seq counters reset on bridge extension restart** — Fixed: `sessionWatcher.ts:loadFullHistory()` derives seq counters from JSONL content on restart, `extension.ts` persists `lastSeenTimestamp` in `globalState` for crash recovery.

@@ -20,6 +20,8 @@ pub struct AppConfig {
     pub show_mode_badge: bool,
     #[serde(default = "default_show_commit_badge")]
     pub show_commit_badge: bool,
+    #[serde(default = "default_show_model_badge")]
+    pub show_model_badge: bool,
 }
 
 fn default_effort() -> String {
@@ -38,6 +40,10 @@ fn default_show_commit_badge() -> bool {
     true
 }
 
+fn default_show_model_badge() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -48,10 +54,11 @@ impl Default for AppConfig {
             notifications_enabled: true,
             workspace_base_path: String::new(),
             max_sessions: 20,
-            model: "claude-opus-4-7".to_string(),
+            model: "claude-opus-4-8".to_string(),
             show_session_metadata: true,
             show_mode_badge: true,
             show_commit_badge: true,
+            show_model_badge: true,
         }
     }
 }
@@ -79,6 +86,8 @@ pub struct FullConfig {
     pub show_mode_badge: bool,
     #[serde(default = "default_show_commit_badge")]
     pub show_commit_badge: bool,
+    #[serde(default = "default_show_model_badge")]
+    pub show_model_badge: bool,
 }
 
 impl FullConfig {
@@ -102,6 +111,7 @@ impl FullConfig {
             show_session_metadata: config.show_session_metadata,
             show_mode_badge: config.show_mode_badge,
             show_commit_badge: config.show_commit_badge,
+            show_model_badge: config.show_model_badge,
         }
     }
 
@@ -119,6 +129,7 @@ impl FullConfig {
             show_session_metadata: self.show_session_metadata,
             show_mode_badge: self.show_mode_badge,
             show_commit_badge: self.show_commit_badge,
+            show_model_badge: self.show_model_badge,
         }
     }
 }
@@ -137,10 +148,11 @@ mod tests {
         );
         assert_eq!(full.anthropic_api_key, Some("sk-ant-test".into()));
         assert_eq!(full.github_pat, Some("ghp_test".into()));
-        assert_eq!(full.model, "claude-sonnet-4-20250514");
+        assert_eq!(full.model, "claude-opus-4-8");
+        assert!(full.show_model_badge);
 
         let back = full.to_app_config();
-        assert_eq!(back.model, "claude-sonnet-4-20250514");
+        assert_eq!(back.model, "claude-opus-4-8");
         // Secrets should not be in the non-secret config
         // (they don't exist on AppConfig at all)
     }

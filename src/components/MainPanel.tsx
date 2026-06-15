@@ -33,7 +33,10 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const remoteSessions = useSessionStore((s) => s.remoteSessions);
   const remoteSessionModes = useSessionStore((s) => s.remoteSessionModes);
   const remoteSessionEffort = useSessionStore((s) => s.remoteSessionEffort);
+  const remoteSessionModel = useSessionStore((s) => s.remoteSessionModel);
+  const machineProtocolVersion = useSessionStore((s) => s.machineProtocolVersion);
   const defaultMode = useSessionStore((s) => s.config.default_mode);
+  const defaultModel = useSessionStore((s) => s.config.model);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const requestSessionHistory = useSessionStore((s) => s.requestSessionHistory);
   const setPanelMode = useUIStore((s) => s.setPanelMode);
@@ -101,10 +104,11 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
 
   // Find remote session info if not a local session
   let remoteSession: RemoteSessionInfo | undefined;
+  let remoteMachineKey: string | undefined;
   if (activeSessionId && !activeSession) {
-    for (const sessions of Object.values(remoteSessions)) {
+    for (const [machineKey, sessions] of Object.entries(remoteSessions)) {
       remoteSession = sessions?.find(s => s.id === activeSessionId);
-      if (remoteSession) break;
+      if (remoteSession) { remoteMachineKey = machineKey; break; }
     }
   }
 
@@ -114,6 +118,15 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
     : undefined;
   const remoteEffort = remoteSession
     ? (remoteSessionEffort[remoteSession.id] ?? 'auto')
+    : undefined;
+  // Only expose the model picker when the serving bridge advertises protocol v1+ (model support).
+  // An old bridge (no protocolVersion) → undefined → InputBar hides the picker rather than
+  // letting a tap silently no-op.
+  const bridgeSupportsModel = remoteMachineKey
+    ? (machineProtocolVersion[remoteMachineKey] ?? 0) >= 1
+    : false;
+  const remoteModel = remoteSession && bridgeSupportsModel
+    ? (remoteSessionModel[remoteSession.id] ?? defaultModel)
     : undefined;
 
   return (
@@ -140,13 +153,13 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
           {activeSession.state === 'waiting_permission' && activeSession.pending_permissions.length > 0 && (
             <PermissionBar session={activeSession} />
           )}
-          <InputBar sessionId={activeSession.id} mode={activeSession.mode} effort={undefined} />
+          <InputBar sessionId={activeSession.id} mode={activeSession.mode} effort={undefined} model={undefined} />
         </>
       ) : panelMode === 'session' && remoteSession ? (
         <>
           <SessionHeader remoteSession={remoteSession} isWide={isWide} />
           <OutputStream sessionId={remoteSession.id} />
-          <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} />
+          <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} model={remoteModel} />
         </>
       ) : (
         <>

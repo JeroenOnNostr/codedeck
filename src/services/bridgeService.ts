@@ -32,7 +32,7 @@ import { uploadToBlossom, DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload'
 const OUTPUT_EVENT_KIND = 4515;
 const SESSION_LIST_EVENT_KIND = 30515;
 
-type SessionListHandler = (msg: { machine: string; sessions: RemoteSessionInfo[]; authStatus?: import('../types').AuthStatus }) => void;
+type SessionListHandler = (msg: { machine: string; sessions: RemoteSessionInfo[]; authStatus?: import('../types').AuthStatus; protocolVersion?: number }) => void;
 type OutputHandler = (sessionId: string, entry: RemoteOutputEntry, seq: number) => void;
 type HistoryHandler = (sessionId: string, entries: Array<{ seq: number; entry: RemoteOutputEntry }>, totalEntries: number, chunkIndex?: number, totalChunks?: number, requestId?: string) => void;
 type StatusHandler = (machine: string, status: 'connected' | 'disconnected' | 'connecting') => void;
@@ -44,6 +44,7 @@ type CloseSessionAckHandler = (sessionId: string, success: boolean) => void;
 type SessionReplacedHandler = (oldSessionId: string, newSession: RemoteSessionInfo) => void;
 type ModeConfirmedHandler = (sessionId: string, mode: import('../types').AgentMode) => void;
 type EffortConfirmedHandler = (sessionId: string, level: import('../types').EffortLevel) => void;
+type ModelConfirmedHandler = (sessionId: string, model: string) => void;
 type CredentialsAckHandler = (machine: string, success: boolean, hasAnthropicKey: boolean, hasGithubPat: boolean, keyValid?: boolean, error?: string) => void;
 
 let pool: SimplePool | null = null;
@@ -62,6 +63,7 @@ let onCloseSessionAck: CloseSessionAckHandler | null = null;
 let onSessionReplaced: SessionReplacedHandler | null = null;
 let onModeConfirmed: ModeConfirmedHandler | null = null;
 let onEffortConfirmed: EffortConfirmedHandler | null = null;
+let onModelConfirmed: ModelConfirmedHandler | null = null;
 let onCredentialsAck: CredentialsAckHandler | null = null;
 
 let ownSecretKeyBytes: Uint8Array | null = null;
@@ -121,6 +123,7 @@ export function setBridgeHandlers(
   sessionReplacedHandler?: SessionReplacedHandler,
   modeConfirmedHandler?: ModeConfirmedHandler,
   effortConfirmedHandler?: EffortConfirmedHandler,
+  modelConfirmedHandler?: ModelConfirmedHandler,
   credentialsAckHandler?: CredentialsAckHandler,
 ): void {
   onSessionList = sessionListHandler;
@@ -135,6 +138,7 @@ export function setBridgeHandlers(
   onSessionReplaced = sessionReplacedHandler ?? null;
   onModeConfirmed = modeConfirmedHandler ?? null;
   onEffortConfirmed = effortConfirmedHandler ?? null;
+  onModelConfirmed = modelConfirmedHandler ?? null;
   onCredentialsAck = credentialsAckHandler ?? null;
 }
 
@@ -337,14 +341,27 @@ export async function sendRemoteEffortChange(
 }
 
 /**
+ * Send a model change to a remote machine (switches the session's Claude model mid-session).
+ */
+export async function sendRemoteModelChange(
+  machine: RemoteMachine,
+  sessionId: string,
+  model: string,
+): Promise<void> {
+  const msg: BridgeOutboundMessage = { type: 'model', sessionId, model };
+  await publishToMachine(machine, msg);
+}
+
+/**
  * Request a new Claude Code terminal session on a remote machine.
  * The bridge will open a Claude Code terminal in the VSCode workspace.
  */
 export async function sendCreateSessionRequest(
   machine: RemoteMachine,
   defaultEffort?: EffortLevel,
+  model?: string,
 ): Promise<void> {
-  const msg: BridgeOutboundMessage = { type: 'create-session', defaultEffort };
+  const msg: BridgeOutboundMessage = { type: 'create-session', defaultEffort, model };
   await publishToMachine(machine, msg);
 }
 
@@ -534,7 +551,7 @@ function handleBridgeEvent(event: { pubkey: string; content: string; created_at:
     switch (msg.type) {
       case 'sessions':
         lastSessionListTimestamps.set(_machine.pubkeyHex, event.created_at);
-        onSessionList?.({ machine: msg.machine, sessions: msg.sessions, authStatus: msg.authStatus });
+        onSessionList?.({ machine: msg.machine, sessions: msg.sessions, authStatus: msg.authStatus, protocolVersion: msg.protocolVersion });
         // Fresh session list = bridge is alive
         onStatus?.(_machine.hostname, 'connected');
         break;
@@ -567,6 +584,9 @@ function handleBridgeEvent(event: { pubkey: string; content: string; created_at:
         break;
       case 'effort-confirmed':
         onEffortConfirmed?.(msg.sessionId, msg.level);
+        break;
+      case 'model-confirmed':
+        onModelConfirmed?.(msg.sessionId, msg.model);
         break;
       case 'credentials-ack':
         onCredentialsAck?.(msg.machine, msg.success, msg.hasAnthropicKey, msg.hasGithubPat, msg.keyValid, msg.error);

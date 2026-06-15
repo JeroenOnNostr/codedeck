@@ -94,6 +94,17 @@
   vertical-align: middle;
 }
 
+.header-model-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent, var(--text-secondary));
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 /* Directional attention indicators for swipe navigation */
 .session-header {
   position: relative;

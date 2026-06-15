@@ -8,6 +8,7 @@ import { AppConfig, AgentMode, EffortLevel, RemoteMachine } from '../types';
 import { parsePrivateKey, getPubkeyHex, parsePublicKey } from '../services/nostrService';
 import { api } from '../ipc/tauri';
 import { sendSetCredentials } from '../services/bridgeService';
+import { MODELS, DEFAULT_MODEL } from '../constants/models';
 import * as nip19 from 'nostr-tools/nip19';
 import { DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload';
 import '../styles/modal.css';
@@ -44,10 +45,11 @@ export default function SettingsModal() {
     notifications_enabled: true,
     workspace_base_path: '',
     max_sessions: 20,
-    model: 'claude-opus-4-6',
+    model: DEFAULT_MODEL,
     show_session_metadata: true,
     show_mode_badge: true,
     show_commit_badge: true,
+    show_model_badge: true,
   });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showPat, setShowPat] = useState(false);
@@ -276,7 +278,8 @@ export default function SettingsModal() {
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
-            <option value="max">Max (Opus only)</option>
+            <option value="xhigh">Extra High (Opus 4.7+ / Fable)</option>
+            <option value="max">Max (new session only)</option>
           </select>
 
           <label className="modal-label">Model</label>
@@ -286,16 +289,16 @@ export default function SettingsModal() {
             onChange={(e) => setLocal({ ...local, model: e.target.value })}
             style={{ cursor: 'pointer' }}
           >
-            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-            <option value="claude-opus-4-6">Claude Opus 4.6</option>
-            <option value="claude-opus-4-7">Claude Opus 4.7</option>
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
           </select>
 
           <ToggleRow label="Auto-push on complete" value={local.auto_push_on_complete} onChange={v => setLocal({ ...local, auto_push_on_complete: v })} />
           <ToggleRow label="Notifications" value={local.notifications_enabled} onChange={v => setLocal({ ...local, notifications_enabled: v })} />
           <ToggleRow label="Show session metadata" value={local.show_session_metadata} onChange={v => setLocal({ ...local, show_session_metadata: v })} />
           <ToggleRow label="Show mode badge" value={local.show_mode_badge} onChange={v => setLocal({ ...local, show_mode_badge: v })} />
+          <ToggleRow label="Show model badge" value={local.show_model_badge} onChange={v => setLocal({ ...local, show_model_badge: v })} />
           <ToggleRow label="Show commit badge" value={local.show_commit_badge} onChange={v => setLocal({ ...local, show_commit_badge: v })} />
         </div>
 

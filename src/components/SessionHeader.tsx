@@ -5,6 +5,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useVoiceModeStore } from '../stores/voiceModeStore';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useOrderedSessionIds } from '../hooks/useOrderedSessionIds';
+import { modelLabel } from '../constants/models';
 import '../styles/header.css';
 
 function formatTokens(usage: TokenUsage): string {
@@ -59,6 +60,8 @@ export default function SessionHeader({ session, remoteSession, isWide }: { sess
   const sessionId = session?.id ?? remoteSession?.id;
   const tokenUsage = useSessionStore((s) => sessionId ? s.tokenUsage[sessionId] : undefined);
   const showModeBadge = useSessionStore((s) => s.config.show_mode_badge);
+  const showModelBadge = useSessionStore((s) => s.config.show_model_badge);
+  const liveModel = useSessionStore((s) => sessionId ? s.remoteSessionModel[sessionId] : undefined);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
   const setVoiceEnabled = useVoiceModeStore((s) => s.setEnabled);
   const speaking = useVoiceModeStore((s) => s.speaking);
@@ -123,6 +126,9 @@ export default function SessionHeader({ session, remoteSession, isWide }: { sess
               {remoteSession.title || remoteSession.slug}
               {showModeBadge && remoteSession.permissionMode === 'default' && (
                 <span className="header-bypass-badge">YOLO</span>
+              )}
+              {showModelBadge && (liveModel ?? remoteSession.model) && (
+                <span className="header-model-badge">{modelLabel(liveModel ?? remoteSession.model)}</span>
               )}
             </div>
             <div className="header-subtitle">{remoteSession.project || remoteSession.cwd}</div>

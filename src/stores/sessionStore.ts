@@ -18,11 +18,13 @@ import {
   sendRefreshRequest,
   sendCloseSessionRequest,
   sendRemoteEffortChange,
+  sendRemoteModelChange,
   sendInterrupt,
 } from '../services/bridgeService';
 import { invoke } from '@tauri-apps/api/core';
 import { persistGet, persistSet } from '../services/persistStore';
 import { notifyIfNeeded } from '../services/notificationService';
+import { DEFAULT_MODEL } from '../constants/models';
 import { useDmStore } from './dmStore';
 
 interface SessionStore {
@@ -38,6 +40,8 @@ interface SessionStore {
   remoteSessions: Record<string, RemoteSessionInfo[]>; // keyed by machine pubkeyHex
   remoteSessionModes: Record<string, AgentMode>; // keyed by sessionId
   remoteSessionEffort: Record<string, EffortLevel>; // keyed by sessionId
+  remoteSessionModel: Record<string, string>; // keyed by sessionId — Claude model ID
+  machineProtocolVersion: Record<string, number>; // keyed by machine pubkeyHex — bridge protocol version (>=1 supports model selection)
   historyLoading: Record<string, boolean>;
   refreshing: boolean;
   /** Pending sessions awaiting JSONL file creation. Map<pendingId, metadata>. */
@@ -66,6 +70,7 @@ interface SessionStore {
   respondPermission: (sessionId: string, requestId: string, allow: boolean) => Promise<void>;
   setMode: (sessionId: string, mode: AgentMode) => Promise<void>;
   setEffort: (sessionId: string, level: EffortLevel) => Promise<void>;
+  setModel: (sessionId: string, model: string) => Promise<void>;
   setRemoteSessionModeLocal: (sessionId: string, mode: AgentMode) => void;
   updateConfig: (config: AppConfig) => Promise<void>;
   initEventListeners: () => Promise<void>;
@@ -112,10 +117,11 @@ const defaultConfig: AppConfig = {
   notifications_enabled: true,
   workspace_base_path: '',
   max_sessions: 20,
-  model: 'claude-opus-4-7',
+  model: DEFAULT_MODEL,
   show_session_metadata: true,
   show_mode_badge: true,
   show_commit_badge: true,
+  show_model_badge: true,
 };
 
 const CONFIG_PERSIST_KEY = 'codedeck_config';
@@ -157,6 +163,7 @@ let pendingDeleteSnapshot: {
   tokenUsage: TokenUsage | null;
   mode: AgentMode | null;
   effort: EffortLevel | null;
+  model: string | null;
 } | null = null;
 
 const UNDO_DELAY_MS = 4_000;
@@ -310,6 +317,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSessions: {},
   remoteSessionModes: {},
   remoteSessionEffort: {},
+  remoteSessionModel: {},
+  machineProtocolVersion: {},
   historyLoading: {},
   refreshing: false,
   pendingSessions: new Map(),
@@ -689,6 +698,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
+  setModel: async (sessionId, model) => {
+    const machine = get().getMachineForSession(sessionId);
+    if (machine) {
+      // Update remote session model optimistically
+      set((state) => ({
+        remoteSessionModel: { ...state.remoteSessionModel, [sessionId]: model },
+      }));
+      try {
+        await sendRemoteModelChange(machine, sessionId, model);
+      } catch (e) {
+        console.error('[SessionStore] Failed to send remote model change:', e);
+      }
+    }
+  },
+
   setRemoteSessionModeLocal: (sessionId, mode) => {
     set((state) => ({
       remoteSessionModes: { ...state.remoteSessionModes, [sessionId]: mode },
@@ -790,7 +814,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     setBridgeHandlers(
       // onSessionList — incremental merge, preserves pending placeholders, deduplicates
-      ({ machine: _machineName, sessions: incomingSessions, authStatus }) => {
+      ({ machine: _machineName, sessions: incomingSessions, authStatus, protocolVersion }) => {
         const machines = get().machines;
         const machine = machines.find(m => m.hostname === _machineName) || machines[0];
         if (machine) {
@@ -904,6 +928,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
                   m.pubkeyHex === machine.pubkeyHex ? { ...m, authStatus } : m,
                 ),
               } : {}),
+              ...(protocolVersion !== undefined && state.machineProtocolVersion[machine.pubkeyHex] !== protocolVersion
+                ? { machineProtocolVersion: { ...state.machineProtocolVersion, [machine.pubkeyHex]: protocolVersion } }
+                : {}),
             };
           });
 
@@ -1204,6 +1231,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             ...(session.effortLevel && !state.remoteSessionEffort[session.id]
               ? { remoteSessionEffort: { ...state.remoteSessionEffort, [session.id]: session.effortLevel } }
               : {}),
+            // Seed model from session-ready payload so UI shows correct model immediately
+            ...(session.model && !state.remoteSessionModel[session.id]
+              ? { remoteSessionModel: { ...state.remoteSessionModel, [session.id]: session.model } }
+              : {}),
           };
         });
         debouncedPersistRemoteSessions(get);
@@ -1318,6 +1349,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           remoteSessionEffort: { ...state.remoteSessionEffort, [sessionId]: level },
         }));
       },
+      // onModelConfirmed — fast feedback from bridge after model change
+      (sessionId: string, model: string) => {
+        set((state) => ({
+          remoteSessionModel: { ...state.remoteSessionModel, [sessionId]: model },
+        }));
+      },
       // onCredentialsAck — bridge confirms credential storage, update machine immediately
       (machineName: string, success: boolean, hasAnthropicKey: boolean, hasGithubPat: boolean, keyValid?: boolean, error?: string) => {
         if (success) {
@@ -1427,8 +1464,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   createRemoteSession: async (machine) => {
     try {
-      const defaultEffort = get().config.default_effort;
-      await sendCreateSessionRequest(machine, defaultEffort !== 'auto' ? defaultEffort : undefined);
+      const { default_effort: defaultEffort, model } = get().config;
+      await sendCreateSessionRequest(
+        machine,
+        defaultEffort !== 'auto' ? defaultEffort : undefined,
+        model || undefined,
+      );
     } catch (e) {
       console.error('[SessionStore] Failed to create remote session:', e);
     }
@@ -1465,6 +1506,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       tokenUsage: get().tokenUsage[sessionId] || null,
       mode: get().remoteSessionModes[sessionId] || null,
       effort: get().remoteSessionEffort[sessionId] || null,
+      model: get().remoteSessionModel[sessionId] || null,
     };
 
     // 2. Add to dismissed map with timestamp
@@ -1562,6 +1604,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSessionEffort: snap.effort
           ? { ...state.remoteSessionEffort, [snap.sessionId]: snap.effort }
           : state.remoteSessionEffort,
+        remoteSessionModel: snap.model
+          ? { ...state.remoteSessionModel, [snap.sessionId]: snap.model }
+          : state.remoteSessionModel,
         dismissedSessionIds: dismissed,
         undoToast: null,
       };
