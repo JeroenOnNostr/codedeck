@@ -6,6 +6,7 @@ import { useSpeechContext } from '../contexts/SpeechContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { processImageFile } from '../utils/imageUtils';
 import { uploadToBlossom, DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload';
+import Avatar from './Avatar';
 import type { DmMessage } from '../types';
 import '../styles/dm.css';
 import '../styles/input.css';
@@ -39,6 +40,8 @@ export default function DmConversationView({ conversationId, isWide }: { convers
   const messages = useDmStore((s) => s.messages[conversationId] ?? EMPTY_MESSAGES);
   const sendDm = useDmStore((s) => s.sendDm);
   const nostrConfig = useDmStore((s) => s.nostrConfig);
+  const resolveProfile = useDmStore((s) => s.resolveProfile);
+  const refreshProfile = useDmStore((s) => s.refreshProfile);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
 
@@ -134,6 +137,17 @@ export default function DmConversationView({ conversationId, isWide }: { convers
 
   const isSent = (msg: { sender_pubkey: string }) => msg.sender_pubkey === ownPubkey;
 
+  // The other participant whose profile drives the header avatar/name.
+  const recipientPubkey = conversation?.participants.find((p) => p !== ownPubkey)
+    ?? conversation?.participants[0];
+  const profile = useDmStore((s) => (recipientPubkey ? s.profiles[recipientPubkey] : undefined));
+  const profileStatus = useDmStore((s) => (recipientPubkey ? s.profileStatus[recipientPubkey] : undefined));
+
+  // Resolve (or refresh stale) profile when the conversation opens.
+  useEffect(() => {
+    if (recipientPubkey) resolveProfile(recipientPubkey);
+  }, [recipientPubkey, resolveProfile]);
+
   // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
@@ -227,8 +241,27 @@ export default function DmConversationView({ conversationId, isWide }: { convers
         <button className="header-btn header-settings" onClick={() => setSettingsOpen(true)}>
           &#9881;
         </button>
+        {recipientPubkey && (
+          <Avatar
+            pubkey={recipientPubkey}
+            picture={profile?.picture}
+            name={profile?.displayName || profile?.name}
+            size={32}
+          />
+        )}
         <div className="header-info">
-          <div className="header-title">{conversation.display_name}</div>
+          <div className={`header-title${profileStatus === 'loading' ? ' dm-tile-name--loading' : ''}`}>
+            {profile?.displayName || profile?.name || conversation.display_name}
+          </div>
+          {profileStatus === 'error' && (
+            <button
+              className="dm-profile-retry-text"
+              onClick={() => recipientPubkey && refreshProfile(recipientPubkey)}
+              type="button"
+            >
+              couldn't load profile — retry
+            </button>
+          )}
         </div>
       </div>
 

@@ -20,6 +20,7 @@ import {
   sendRemoteEffortChange,
   sendRemoteModelChange,
   sendInterrupt,
+  sendPairRequest,
 } from '../services/bridgeService';
 import { invoke } from '@tauri-apps/api/core';
 import { persistGet, persistSet } from '../services/persistStore';
@@ -55,6 +56,8 @@ interface SessionStore {
   sessionReadyTimestamps: Map<string, number>;
   /** Undo toast state — shown briefly after deleting a remote session. */
   undoToast: { sessionId: string; label: string } | null;
+  /** Transient toast shown briefly after a phone auto-pairs with a bridge. */
+  pairToast: { machine: string } | null;
 
   setActiveSession: (id: string) => void;
   addOutput: (sessionId: string, entry: OutputEntry) => void;
@@ -77,6 +80,9 @@ interface SessionStore {
 
   // Remote bridge actions
   addMachine: (machine: RemoteMachine) => void;
+  /** Auto-pairing: send this phone's identity + the QR token to a freshly added machine. */
+  pairWithMachine: (machine: RemoteMachine, token: string, ownNpub: string, ownPubkeyHex: string) => void;
+  dismissPairToast: () => void;
   removeMachine: (pubkeyHex: string) => void;
   initBridgeService: (privateKeyHex: string) => Promise<void>;
   isRemoteSession: (sessionId: string) => boolean;
@@ -325,6 +331,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   dismissedSessionIds: new Map(),
   sessionReadyTimestamps: new Map(),
   undoToast: null,
+  pairToast: null,
   respondedCards: new Map(),
   planApprovalChoices: new Map(),
   pendingRevisionSession: null,
@@ -764,6 +771,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     connectToMachine(machine);
     persistSet('codedeck_machines', get().machines);
   },
+
+  pairWithMachine: (machine, token, ownNpub, ownPubkeyHex) => {
+    // Fire the pairing request; the bridge's open pairing window will accept it
+    // (token-gated) and reply with a pair-ack that flips the machine to connected.
+    sendPairRequest(machine, ownNpub, ownPubkeyHex, 'Codedeck Phone', token).catch((err) => {
+      console.warn('[Store] pair-request publish failed:', err);
+    });
+  },
+
+  dismissPairToast: () => set({ pairToast: null }),
 
   removeMachine: (pubkeyHex) => {
     disconnectFromMachine(pubkeyHex);
@@ -1368,6 +1385,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }));
         } else {
           console.error(`[Store] Failed to save credentials on ${machineName}: ${error}`);
+        }
+      },
+      // onPairAck — bridge confirms (or rejects) an auto-pairing request
+      (machineName: string, ok: boolean, reason?: string) => {
+        if (ok) {
+          console.log(`[Store] Auto-paired with ${machineName}`);
+          set((state) => ({
+            machines: state.machines.map(m =>
+              m.hostname === machineName ? { ...m, connected: true } : m,
+            ),
+            pairToast: { machine: machineName },
+          }));
+          // Auto-dismiss the toast after a few seconds
+          setTimeout(() => {
+            if (get().pairToast?.machine === machineName) set({ pairToast: null });
+          }, 4000);
+        } else {
+          console.warn(`[Store] Pairing rejected by ${machineName}: ${reason ?? 'unknown'}`);
         }
       },
     );

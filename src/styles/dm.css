@@ -225,6 +225,74 @@
   flex-shrink: 0;
 }
 
+/* === Profile Avatar === */
+
+.dm-avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.dm-avatar-img {
+  object-fit: cover;
+  background: var(--bg-hover);
+}
+
+.dm-avatar-fallback {
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Subtle shimmer while a profile name is resolving. */
+.dm-tile-name--loading {
+  animation: dm-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes dm-shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Inline "↻" retry on a DM tile when profile resolution failed. */
+.dm-profile-retry {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.dm-profile-retry:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* Text retry under the conversation header title. */
+.dm-profile-retry-text {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 0;
+  margin-top: 2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dm-profile-retry-text:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
 /* === New DM Input === */
 
 .new-dm-input {

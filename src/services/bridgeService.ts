@@ -46,6 +46,7 @@ type ModeConfirmedHandler = (sessionId: string, mode: import('../types').AgentMo
 type EffortConfirmedHandler = (sessionId: string, level: import('../types').EffortLevel) => void;
 type ModelConfirmedHandler = (sessionId: string, model: string) => void;
 type CredentialsAckHandler = (machine: string, success: boolean, hasAnthropicKey: boolean, hasGithubPat: boolean, keyValid?: boolean, error?: string) => void;
+type PairAckHandler = (machine: string, ok: boolean, reason?: string) => void;
 
 let pool: SimplePool | null = null;
 const subscriptions: Map<string, ReturnType<SimplePool['subscribeMany']>> = new Map();
@@ -65,6 +66,7 @@ let onModeConfirmed: ModeConfirmedHandler | null = null;
 let onEffortConfirmed: EffortConfirmedHandler | null = null;
 let onModelConfirmed: ModelConfirmedHandler | null = null;
 let onCredentialsAck: CredentialsAckHandler | null = null;
+let onPairAck: PairAckHandler | null = null;
 
 let ownSecretKeyBytes: Uint8Array | null = null;
 let ownPubkeyHex: string | null = null;
@@ -125,6 +127,7 @@ export function setBridgeHandlers(
   effortConfirmedHandler?: EffortConfirmedHandler,
   modelConfirmedHandler?: ModelConfirmedHandler,
   credentialsAckHandler?: CredentialsAckHandler,
+  pairAckHandler?: PairAckHandler,
 ): void {
   onSessionList = sessionListHandler;
   onOutput = outputHandler;
@@ -140,6 +143,7 @@ export function setBridgeHandlers(
   onEffortConfirmed = effortConfirmedHandler ?? null;
   onModelConfirmed = modelConfirmedHandler ?? null;
   onCredentialsAck = credentialsAckHandler ?? null;
+  onPairAck = pairAckHandler ?? null;
 }
 
 /**
@@ -481,6 +485,22 @@ export async function sendSetCredentials(
   await publishToMachine(machine, msg);
 }
 
+/**
+ * Send a pairing request to a bridge (NIP-44 encrypted to the bridge pubkey).
+ * Carries the phone's own identity plus the one-time token from the QR, so the
+ * bridge can pair this phone with no manual npub entry. Returns true on publish.
+ */
+export async function sendPairRequest(
+  machine: RemoteMachine,
+  npub: string,
+  pubkeyHex: string,
+  label: string,
+  token: string,
+): Promise<boolean> {
+  const msg: BridgeOutboundMessage = { type: 'pair-request', npub, pubkeyHex, label, token };
+  return publishToMachine(machine, msg);
+}
+
 // --- Internal ---
 
 async function publishToMachine(machine: RemoteMachine, msg: BridgeOutboundMessage): Promise<boolean> {
@@ -590,6 +610,9 @@ function handleBridgeEvent(event: { pubkey: string; content: string; created_at:
         break;
       case 'credentials-ack':
         onCredentialsAck?.(msg.machine, msg.success, msg.hasAnthropicKey, msg.hasGithubPat, msg.keyValid, msg.error);
+        break;
+      case 'pair-ack':
+        onPairAck?.(msg.machine, msg.ok, msg.reason);
         break;
     }
   } catch (err) {

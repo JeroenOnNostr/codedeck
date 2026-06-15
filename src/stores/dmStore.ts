@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import type { DmConversation, DmMessage, NostrConfig } from '../types';
+import type { DmConversation, DmMessage, NostrConfig, ProfileMetadata, ProfileStatus } from '../types';
 import * as nostr from '../services/nostrService';
+import * as profileService from '../services/profileService';
 import { npubEncode } from 'nostr-tools/nip19';
 import { persistGet, persistSet } from '../services/persistStore';
 import { dmLog, dmWarn } from '../services/debugLog';
@@ -18,7 +19,10 @@ interface DmStore {
   activeConversationId: string | null;
   nostrConfig: NostrConfig;
   connectionStatus: 'disconnected' | 'connecting' | 'connected';
-  profileCache: Record<string, { name: string; fetchedAt: number }>;
+  /** Full profile metadata keyed by pubkey hex (persisted). */
+  profiles: Record<string, ProfileMetadata>;
+  /** Transient per-pubkey resolution status for UI (not persisted). */
+  profileStatus: Record<string, ProfileStatus>;
 
   setActiveConversation: (id: string | null) => void;
   addMessage: (msg: DmMessage) => void;
@@ -31,7 +35,8 @@ interface DmStore {
   sendDm: (recipientPubkey: string, content: string) => Promise<void>;
   startConversation: (recipientPubkey: string, displayName?: string) => void;
   loadPersisted: () => Promise<void>;
-  resolveProfileName: (pubkeyHex: string) => Promise<void>;
+  resolveProfile: (pubkeyHex: string, opts?: { force?: boolean }) => Promise<void>;
+  refreshProfile: (pubkeyHex: string) => Promise<void>;
   resolveAllProfiles: () => void;
 }
 
@@ -39,16 +44,18 @@ interface PersistedDmData {
   conversations: DmConversation[];
   messages: Record<string, DmMessage[]>;
   nostrConfig: NostrConfig;
+  profiles?: Record<string, ProfileMetadata>;
+  /** Legacy shape (pre-outbox) — migrated to `profiles` on load. */
   profileCache?: Record<string, { name: string; fetchedAt: number }>;
 }
 
 function persist(state: { conversations: DmConversation[]; messages: Record<string, DmMessage[]>; nostrConfig: NostrConfig }) {
-  const profileCache = useDmStore.getState().profileCache;
+  const profiles = useDmStore.getState().profiles;
   persistSet(STORAGE_KEY, {
     conversations: state.conversations,
     messages: state.messages,
     nostrConfig: state.nostrConfig,
-    profileCache,
+    profiles,
   });
 }
 
@@ -75,7 +82,8 @@ export const useDmStore = create<DmStore>((set, get) => ({
   activeConversationId: null,
   nostrConfig: { private_key_hex: null, relays: DEFAULT_RELAYS },
   connectionStatus: 'disconnected',
-  profileCache: {},
+  profiles: {},
+  profileStatus: {},
 
   setActiveConversation: (id) => {
     set({ activeConversationId: id });
@@ -153,9 +161,9 @@ export const useDmStore = create<DmStore>((set, get) => ({
       return newState;
     });
 
-    // Resolve profile name for newly auto-created conversation
+    // Resolve profile for newly auto-created conversation
     if (newConvPubkey) {
-      get().resolveProfileName(newConvPubkey);
+      get().resolveProfile(newConvPubkey);
     }
   },
 
@@ -255,7 +263,7 @@ export const useDmStore = create<DmStore>((set, get) => ({
       messages: state.messages[convId] ? state.messages : { ...state.messages, [convId]: [] },
     }));
     persist({ conversations: get().conversations, messages: get().messages, nostrConfig: get().nostrConfig });
-    get().resolveProfileName(recipientPubkey);
+    get().resolveProfile(recipientPubkey);
   },
 
   loadPersisted: async () => {
@@ -269,52 +277,82 @@ export const useDmStore = create<DmStore>((set, get) => ({
         c => !c.participants.every(p => mockPubkeys.has(p)),
       );
 
+      // Migrate legacy profileCache ({ name, fetchedAt }) → profiles (full metadata).
+      const migrated: Record<string, ProfileMetadata> = {};
+      if (data.profileCache) {
+        for (const [hex, v] of Object.entries(data.profileCache)) {
+          migrated[hex] = { displayName: v.name, fetchedAt: v.fetchedAt, status: 'ok' };
+        }
+      }
+      const profiles = { ...migrated, ...(data.profiles || {}) }; // new shape wins
+
       set({
         conversations,
         messages: data.messages || {},
         nostrConfig: data.nostrConfig || { private_key_hex: null, relays: DEFAULT_RELAYS },
-        profileCache: data.profileCache || {},
+        profiles,
+        profileStatus: {},
       });
     } catch { /* corrupt data — start fresh */ }
   },
 
-  resolveProfileName: async (pubkeyHex) => {
-    const { profileCache, nostrConfig } = get();
-
-    // Skip if already cached and fresh (< 24 hours)
-    const cached = profileCache[pubkeyHex];
+  resolveProfile: async (pubkeyHex, opts) => {
+    const { profiles } = get();
     const CACHE_TTL = 24 * 60 * 60 * 1000;
-    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
-      updateConversationNames(pubkeyHex, cached.name, get, set);
+
+    // Cache hit, fresh, resolved OK, and not forced → apply and return.
+    const cached = profiles[pubkeyHex];
+    if (!opts?.force && cached && cached.status === 'ok' && Date.now() - cached.fetchedAt < CACHE_TTL) {
+      applyProfileToConversations(pubkeyHex, cached, get, set);
+      set((state) => ({ profileStatus: { ...state.profileStatus, [pubkeyHex]: 'ok' } }));
       return;
     }
 
-    const name = await nostr.fetchProfileName(pubkeyHex, nostrConfig.relays);
-    if (!name) return;
+    set((state) => ({ profileStatus: { ...state.profileStatus, [pubkeyHex]: 'loading' } }));
 
-    set((state) => ({
-      profileCache: { ...state.profileCache, [pubkeyHex]: { name, fetchedAt: Date.now() } },
-    }));
+    // fetchProfileDedup collapses concurrent calls for the same pubkey.
+    const meta = await profileService.fetchProfileDedup(pubkeyHex);
 
-    updateConversationNames(pubkeyHex, name, get, set);
+    if (meta.status === 'ok') {
+      set((state) => ({
+        profiles: { ...state.profiles, [pubkeyHex]: meta },
+        profileStatus: { ...state.profileStatus, [pubkeyHex]: 'ok' },
+      }));
+      applyProfileToConversations(pubkeyHex, meta, get, set);
+      persist({ conversations: get().conversations, messages: get().messages, nostrConfig: get().nostrConfig });
+    } else {
+      // notfound — cache the result (cheap retry later) but surface an error
+      // state so the UI shows a tap-to-retry affordance.
+      set((state) => ({
+        profiles: { ...state.profiles, [pubkeyHex]: meta },
+        profileStatus: { ...state.profileStatus, [pubkeyHex]: 'error' },
+      }));
+      persist({ conversations: get().conversations, messages: get().messages, nostrConfig: get().nostrConfig });
+    }
+  },
+
+  refreshProfile: async (pubkeyHex) => {
+    await get().resolveProfile(pubkeyHex, { force: true });
   },
 
   resolveAllProfiles: () => {
     const { conversations, nostrConfig } = get();
     if (!nostrConfig.private_key_hex) return;
     const ownPubkey = nostr.getPubkeyHex(parseHexToBytes(nostrConfig.private_key_hex));
+    get().resolveProfile(ownPubkey); // own profile (for sent-bubble avatars / consistency)
     for (const conv of conversations) {
       const other = conv.participants.find(p => p !== ownPubkey);
-      if (other) get().resolveProfileName(other);
+      if (other) get().resolveProfile(other);
     }
   },
 }));
 
 // --- Helpers ---
 
-function updateConversationNames(
+/** Update the back-compat `display_name` label on conversations for this pubkey. */
+function applyProfileToConversations(
   pubkeyHex: string,
-  name: string,
+  meta: ProfileMetadata,
   get: () => DmStore,
   set: (partial: Partial<DmStore> | ((s: DmStore) => Partial<DmStore>)) => void,
 ) {
@@ -323,12 +361,15 @@ function updateConversationNames(
     ? nostr.getPubkeyHex(parseHexToBytes(nostrConfig.private_key_hex))
     : '';
 
+  const label = meta.displayName || meta.name;
+  if (!label) return; // nothing better than the existing truncated-npub label
+
   let changed = false;
   const updated = conversations.map((c) => {
     const otherPubkey = c.participants.find((p) => p !== ownPubkey);
-    if (otherPubkey === pubkeyHex && c.display_name !== name) {
+    if (otherPubkey === pubkeyHex && c.display_name !== label) {
       changed = true;
-      return { ...c, display_name: name };
+      return { ...c, display_name: label };
     }
     return c;
   });

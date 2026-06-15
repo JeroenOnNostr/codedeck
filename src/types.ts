@@ -85,6 +85,20 @@ export interface DmConversation {
   unread_count: number;
 }
 
+/** Full NIP-01 kind-0 profile metadata, cached per pubkey. */
+export interface ProfileMetadata {
+  name?: string;
+  displayName?: string;
+  picture?: string;
+  nip05?: string;
+  about?: string;
+  fetchedAt: number;
+  status: 'ok' | 'notfound';
+}
+
+/** Transient UI status for an in-progress / failed profile resolution. */
+export type ProfileStatus = 'loading' | 'ok' | 'error';
+
 export interface DmMessage {
   id: string;
   conversation_id: string;
@@ -147,7 +161,8 @@ export type BridgeInboundMessage =
   | { type: 'mode-confirmed'; sessionId: string; mode: AgentMode }
   | { type: 'effort-confirmed'; sessionId: string; level: EffortLevel }
   | { type: 'model-confirmed'; sessionId: string; model: string }
-  | { type: 'credentials-ack'; machine: string; success: boolean; hasAnthropicKey: boolean; hasGithubPat: boolean; keyValid?: boolean; error?: string };
+  | { type: 'credentials-ack'; machine: string; success: boolean; hasAnthropicKey: boolean; hasGithubPat: boolean; keyValid?: boolean; error?: string }
+  | { type: 'pair-ack'; machine: string; ok: boolean; reason?: string };
 
 export type BridgeOutboundMessage =
   | { type: 'input'; sessionId: string; text: string }
@@ -164,4 +179,5 @@ export type BridgeOutboundMessage =
   | { type: 'close-session'; sessionId: string }
   | { type: 'upload-image'; sessionId: string; uploadId: string; filename: string; mimeType: string; base64Data: string; text: string; chunkIndex: number; totalChunks: number }
   | { type: 'upload-image'; sessionId: string; hash: string; url: string; key: string; iv: string; filename: string; mimeType: string; text: string; sizeBytes: number }
-  | { type: 'set-credentials'; anthropicApiKey?: string | null; githubPat?: string | null };
+  | { type: 'set-credentials'; anthropicApiKey?: string | null; githubPat?: string | null }
+  | { type: 'pair-request'; npub: string; pubkeyHex: string; label: string; token: string };

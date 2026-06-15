@@ -3,7 +3,8 @@ import { useUIStore } from './stores/uiStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useDmStore } from './stores/dmStore';
 import { useMediaQuery } from './hooks/useMediaQuery';
-import { parsePublicKey } from './services/nostrService';
+import { parsePublicKey, getPubkeyHex } from './services/nostrService';
+import { generateSecretKey } from 'nostr-tools/pure';
 import { useQuickPromptStore } from './stores/quickPromptStore';
 import { useVoiceModeStore } from './stores/voiceModeStore';
 import { initNotifications, setAppHidden } from './services/notificationService';
@@ -19,6 +20,7 @@ import SettingsModal from './components/SettingsModal';
 import NewSessionModal from './components/NewSessionModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import UndoToast from './components/UndoToast';
+import PairToast from './components/PairToast';
 import './styles/global.css';
 
 function handleDeepLink(url: string): void {
@@ -29,6 +31,7 @@ function handleDeepLink(url: string): void {
     const npub = parsed.searchParams.get('npub');
     const relaysParam = parsed.searchParams.get('relays');
     const machineName = parsed.searchParams.get('machine') || 'Remote';
+    const token = parsed.searchParams.get('token');
 
     if (!npub) return;
     const pubkeyHex = parsePublicKey(npub);
@@ -63,9 +66,34 @@ function handleDeepLink(url: string): void {
         ...(blossomParam ? { blossomServer: blossomParam } : {}),
       });
     }
+
+    // Auto-pairing: if the QR carried a token, send this phone's identity back to
+    // the bridge so it pairs us with no manual npub entry. A key is guaranteed to
+    // exist by the first-run auto-generation in the init effect.
+    if (token && currentConfig.private_key_hex) {
+      try {
+        const ownHex = getPubkeyHex(hexToBytes(currentConfig.private_key_hex));
+        const ownNpub = nip19.npubEncode(ownHex);
+        useSessionStore.getState().pairWithMachine(machine, token, ownNpub, ownHex);
+      } catch (err) {
+        console.warn('[App] Failed to send pair-request:', err);
+      }
+    }
   } catch {
     // Malformed URL — ignore silently
   }
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export default function App() {
@@ -86,7 +114,19 @@ export default function App() {
     // Load persisted DMs first (includes Nostr private key), then init bridge
     useDmStore.getState().loadPersisted().then(() => {
       const dmState = useDmStore.getState();
-      const nostrConfig = dmState.nostrConfig;
+      let nostrConfig = dmState.nostrConfig;
+
+      // First-run: a fresh install has no keypair, so pairing AND DMs are dead
+      // until the user pastes an nsec. Auto-generate one so the app works out of
+      // the box. The user can still import an existing nsec in Settings (which
+      // overwrites this). The same key powers both DMs and the bridge.
+      if (!nostrConfig.private_key_hex) {
+        const sk = generateSecretKey();
+        const hex = bytesToHex(sk);
+        dmState.updateNostrConfig({ ...nostrConfig, private_key_hex: hex });
+        nostrConfig = useDmStore.getState().nostrConfig; // re-read after update
+      }
+
       if (nostrConfig.private_key_hex) {
         useSessionStore.getState().initBridgeService(nostrConfig.private_key_hex);
       }
@@ -246,6 +286,7 @@ export default function App() {
       <MainPanel isWide={isWide} />
 
       <UndoToast />
+      <PairToast />
 
       <ErrorBoundary>
       {settingsOpen && <SettingsModal />}
