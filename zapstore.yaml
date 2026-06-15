@@ -1,0 +1,41 @@
+repository: https://github.com/JeroenOnNostr/codedeck
+
+name: CodeDeck
+
+summary: Control Claude Code sessions on your laptop from your phone over encrypted Nostr.
+
+description: |
+  CodeDeck is a multi-session agentic coding interface for your phone.
+
+  Run Claude Code on your laptop and drive it from anywhere: review plans, approve
+  tool permissions, switch models and effort levels, and chat with multiple coding
+  sessions at once — all from your Android device.
+
+  CodeDeck talks to a companion VSCode extension (Codedeck Bridge) over end-to-end
+  encrypted Nostr relays (NIP-44). No accounts, no central server: your phone and
+  laptop pair directly by scanning a QR code.
+
+  Features:
+  - Multiple concurrent Claude Code sessions, switchable from one app
+  - Plan approval, permission cards, and AskUserQuestion prompts on your phone
+  - Per-session model selection (Opus, Sonnet, Haiku, Fable) and effort levels
+  - Encrypted Nostr direct messages
+  - Designed for the Pixel Fold landscape split-panel; works on any Android phone
+
+  Pairs with the Codedeck Bridge VSCode extension:
+  https://github.com/JeroenOnNostr/codedeck-bridge-vscode
+
+tags:
+  - nostr
+  - developer-tools
+  - claude
+  - ai
+  - coding
+
+icon: ./src-tauri/icons/icon.png
+
+images:
+  - ./docs/screenshots/fold-session-list.png
+  - ./docs/screenshots/fold-plan-approval.png
+  - ./docs/screenshots/phone-session-view.png
+  - ./docs/screenshots/phone-plan-view.png
