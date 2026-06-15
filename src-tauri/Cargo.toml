@@ -1,6 +1,8 @@
 [package]
 name = "codedeck"
-version = "0.8.0"
+# Cargo requires strict semver (no leading zeros), so the crate uses 2026.6.15.
+# User-facing version (package.json, Android, releases) is the zero-padded 2026.06.15.
+version = "2026.6.15"
 description = "CodeDeck - Multi-session AI coding agent"
 authors = ["you"]
 license = ""

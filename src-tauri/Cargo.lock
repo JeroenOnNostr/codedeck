@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "codedeck"
-version = "0.8.0"
+version = "2026.6.15"
 dependencies = [
  "anyhow",
  "async-trait",
