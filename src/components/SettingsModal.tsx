@@ -50,6 +50,7 @@ export default function SettingsModal() {
     show_mode_badge: true,
     show_commit_badge: true,
     show_model_badge: true,
+    show_usage_badge: true,
   });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showPat, setShowPat] = useState(false);
@@ -299,6 +300,7 @@ export default function SettingsModal() {
           <ToggleRow label="Show session metadata" value={local.show_session_metadata} onChange={v => setLocal({ ...local, show_session_metadata: v })} />
           <ToggleRow label="Show mode badge" value={local.show_mode_badge} onChange={v => setLocal({ ...local, show_mode_badge: v })} />
           <ToggleRow label="Show model badge" value={local.show_model_badge} onChange={v => setLocal({ ...local, show_model_badge: v })} />
+          <ToggleRow label="Show usage badge" value={local.show_usage_badge} onChange={v => setLocal({ ...local, show_usage_badge: v })} />
           <ToggleRow label="Show commit badge" value={local.show_commit_badge} onChange={v => setLocal({ ...local, show_commit_badge: v })} />
         </div>
 

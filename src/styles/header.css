@@ -105,6 +105,33 @@
   vertical-align: middle;
 }
 
+/* Subscription usage chip — tap to open the detail panel. */
+.header-usage-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.header-usage-badge.usage-warning {
+  color: #f59e0b;
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.header-usage-badge.usage-critical {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
 /* Directional attention indicators for swipe navigation */
 .session-header {
   position: relative;

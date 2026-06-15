@@ -45,6 +45,7 @@ type SessionReplacedHandler = (oldSessionId: string, newSession: RemoteSessionIn
 type ModeConfirmedHandler = (sessionId: string, mode: import('../types').AgentMode) => void;
 type EffortConfirmedHandler = (sessionId: string, level: import('../types').EffortLevel) => void;
 type ModelConfirmedHandler = (sessionId: string, model: string) => void;
+type UsageHandler = (sessionId: string, usage: import('../types').UsageData) => void;
 type CredentialsAckHandler = (machine: string, success: boolean, hasAnthropicKey: boolean, hasGithubPat: boolean, keyValid?: boolean, error?: string) => void;
 type PairAckHandler = (machine: string, ok: boolean, reason?: string) => void;
 
@@ -65,6 +66,7 @@ let onSessionReplaced: SessionReplacedHandler | null = null;
 let onModeConfirmed: ModeConfirmedHandler | null = null;
 let onEffortConfirmed: EffortConfirmedHandler | null = null;
 let onModelConfirmed: ModelConfirmedHandler | null = null;
+let onUsage: UsageHandler | null = null;
 let onCredentialsAck: CredentialsAckHandler | null = null;
 let onPairAck: PairAckHandler | null = null;
 
@@ -128,6 +130,7 @@ export function setBridgeHandlers(
   modelConfirmedHandler?: ModelConfirmedHandler,
   credentialsAckHandler?: CredentialsAckHandler,
   pairAckHandler?: PairAckHandler,
+  usageHandler?: UsageHandler,
 ): void {
   onSessionList = sessionListHandler;
   onOutput = outputHandler;
@@ -142,6 +145,7 @@ export function setBridgeHandlers(
   onModeConfirmed = modeConfirmedHandler ?? null;
   onEffortConfirmed = effortConfirmedHandler ?? null;
   onModelConfirmed = modelConfirmedHandler ?? null;
+  onUsage = usageHandler ?? null;
   onCredentialsAck = credentialsAckHandler ?? null;
   onPairAck = pairAckHandler ?? null;
 }
@@ -353,6 +357,18 @@ export async function sendRemoteModelChange(
   model: string,
 ): Promise<void> {
   const msg: BridgeOutboundMessage = { type: 'model', sessionId, model };
+  await publishToMachine(machine, msg);
+}
+
+/**
+ * Request a fresh subscription-usage snapshot for a session. The bridge responds (when supported)
+ * with a `usage` message handled by onUsage.
+ */
+export async function sendUsageRequest(
+  machine: RemoteMachine,
+  sessionId: string,
+): Promise<void> {
+  const msg: BridgeOutboundMessage = { type: 'usage-request', sessionId };
   await publishToMachine(machine, msg);
 }
 
@@ -607,6 +623,9 @@ function handleBridgeEvent(event: { pubkey: string; content: string; created_at:
         break;
       case 'model-confirmed':
         onModelConfirmed?.(msg.sessionId, msg.model);
+        break;
+      case 'usage':
+        onUsage?.(msg.sessionId, msg.usage);
         break;
       case 'credentials-ack':
         onCredentialsAck?.(msg.machine, msg.success, msg.hasAnthropicKey, msg.hasGithubPat, msg.keyValid, msg.error);

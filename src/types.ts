@@ -57,6 +57,7 @@ export interface AppConfig {
   show_mode_badge: boolean;
   show_commit_badge: boolean;
   show_model_badge: boolean;
+  show_usage_badge: boolean;
 }
 
 // --- Quick Prompts ---
@@ -148,6 +149,32 @@ export interface RemoteOutputEntry {
   metadata?: Record<string, unknown>;
 }
 
+// --- Subscription usage / rate-limit windows ---
+// NOTE: these MUST stay byte-for-byte in sync with the bridge's copy in
+// codedeck-bridge-vscode/src/types.ts (the two protocol type files are hand-mirrored).
+
+/** A single claude.ai plan rate-limit window. `utilization` is 0-100; `resetsAt` is ISO 8601.
+ *  Either may be null when the bridge reports the window but not its value. */
+export interface UsageWindow {
+  utilization: number | null;
+  resetsAt: string | null;
+}
+
+/** Normalized subscription usage snapshot pushed by the bridge. */
+export interface UsageData {
+  /** False for API-key / Bedrock / Vertex sessions — phone hides the indicator entirely. */
+  available: boolean;
+  /** 'pro' | 'max' | 'team' | 'enterprise' or null. */
+  subscriptionType: string | null;
+  fiveHour?: UsageWindow;
+  sevenDay?: UsageWindow;
+  sevenDayOpus?: UsageWindow;
+  sevenDaySonnet?: UsageWindow;
+  sessionCostUsd?: number;
+  /** ISO timestamp (bridge clock) of when this snapshot was fetched. */
+  fetchedAt: string;
+}
+
 export type BridgeInboundMessage =
   | { type: 'sessions'; machine: string; sessions: RemoteSessionInfo[]; authStatus?: AuthStatus; protocolVersion?: number }
   | { type: 'output'; sessionId: string; seq: number; entry: RemoteOutputEntry }
@@ -161,6 +188,7 @@ export type BridgeInboundMessage =
   | { type: 'mode-confirmed'; sessionId: string; mode: AgentMode }
   | { type: 'effort-confirmed'; sessionId: string; level: EffortLevel }
   | { type: 'model-confirmed'; sessionId: string; model: string }
+  | { type: 'usage'; sessionId: string; usage: UsageData }
   | { type: 'credentials-ack'; machine: string; success: boolean; hasAnthropicKey: boolean; hasGithubPat: boolean; keyValid?: boolean; error?: string }
   | { type: 'pair-ack'; machine: string; ok: boolean; reason?: string };
 
@@ -172,6 +200,7 @@ export type BridgeOutboundMessage =
   | { type: 'mode'; sessionId: string; mode: AgentMode }
   | { type: 'effort'; sessionId: string; level: EffortLevel }
   | { type: 'model'; sessionId: string; model: string }
+  | { type: 'usage-request'; sessionId: string }
   | { type: 'history-request'; sessionId: string; afterSeq?: number }
   | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string }
   | { type: 'refresh-sessions' }

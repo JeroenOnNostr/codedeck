@@ -22,6 +22,8 @@ pub struct AppConfig {
     pub show_commit_badge: bool,
     #[serde(default = "default_show_model_badge")]
     pub show_model_badge: bool,
+    #[serde(default = "default_show_usage_badge")]
+    pub show_usage_badge: bool,
 }
 
 fn default_effort() -> String {
@@ -44,6 +46,10 @@ fn default_show_model_badge() -> bool {
     true
 }
 
+fn default_show_usage_badge() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -59,6 +65,7 @@ impl Default for AppConfig {
             show_mode_badge: true,
             show_commit_badge: true,
             show_model_badge: true,
+            show_usage_badge: true,
         }
     }
 }
@@ -88,6 +95,8 @@ pub struct FullConfig {
     pub show_commit_badge: bool,
     #[serde(default = "default_show_model_badge")]
     pub show_model_badge: bool,
+    #[serde(default = "default_show_usage_badge")]
+    pub show_usage_badge: bool,
 }
 
 impl FullConfig {
@@ -112,6 +121,7 @@ impl FullConfig {
             show_mode_badge: config.show_mode_badge,
             show_commit_badge: config.show_commit_badge,
             show_model_badge: config.show_model_badge,
+            show_usage_badge: config.show_usage_badge,
         }
     }
 
@@ -130,6 +140,7 @@ impl FullConfig {
             show_mode_badge: self.show_mode_badge,
             show_commit_badge: self.show_commit_badge,
             show_model_badge: self.show_model_badge,
+            show_usage_badge: self.show_usage_badge,
         }
     }
 }

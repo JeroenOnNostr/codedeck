@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useDmStore } from '../stores/dmStore';
 import { useUIStore } from '../stores/uiStore';
@@ -39,6 +39,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const defaultModel = useSessionStore((s) => s.config.model);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const requestSessionHistory = useSessionStore((s) => s.requestSessionHistory);
+  const refreshUsage = useSessionStore((s) => s.refreshUsage);
   const setPanelMode = useUIStore((s) => s.setPanelMode);
   const isTouchDevice = useMediaQuery('(pointer: coarse)');
 
@@ -128,6 +129,19 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const remoteModel = remoteSession && bridgeSupportsModel
     ? (remoteSessionModel[remoteSession.id] ?? defaultModel)
     : undefined;
+  // Usage snapshots are a protocol v3+ feature. Gate the header badge so older bridges stay silent.
+  const bridgeSupportsUsage = remoteMachineKey
+    ? (machineProtocolVersion[remoteMachineKey] ?? 0) >= 3
+    : false;
+
+  // Pull a fresh usage snapshot whenever a usage-capable remote session becomes active, so the
+  // badge shows a current value immediately on open (the bridge also pushes on its 60s heartbeat).
+  const remoteSessionId = remoteSession?.id;
+  useEffect(() => {
+    if (remoteSessionId && bridgeSupportsUsage) {
+      refreshUsage(remoteSessionId);
+    }
+  }, [remoteSessionId, bridgeSupportsUsage, refreshUsage]);
 
   return (
     <div
@@ -157,7 +171,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
         </>
       ) : panelMode === 'session' && remoteSession ? (
         <>
-          <SessionHeader remoteSession={remoteSession} isWide={isWide} />
+          <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
           <OutputStream sessionId={remoteSession.id} />
           <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} model={remoteModel} />
         </>

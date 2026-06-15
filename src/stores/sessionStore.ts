@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Session, OutputEntry, AppConfig, AgentMode, EffortLevel, TokenUsage, RemoteMachine, RemoteSessionInfo, RemoteOutputEntry } from '../types';
+import { Session, OutputEntry, AppConfig, AgentMode, EffortLevel, TokenUsage, RemoteMachine, RemoteSessionInfo, RemoteOutputEntry, UsageData } from '../types';
 import { api, events, isTauri } from '../ipc/tauri';
 import {
   initBridge,
@@ -19,6 +19,7 @@ import {
   sendCloseSessionRequest,
   sendRemoteEffortChange,
   sendRemoteModelChange,
+  sendUsageRequest,
   sendInterrupt,
   sendPairRequest,
 } from '../services/bridgeService';
@@ -42,6 +43,7 @@ interface SessionStore {
   remoteSessionModes: Record<string, AgentMode>; // keyed by sessionId
   remoteSessionEffort: Record<string, EffortLevel>; // keyed by sessionId
   remoteSessionModel: Record<string, string>; // keyed by sessionId — Claude model ID
+  remoteSessionUsage: Record<string, UsageData>; // keyed by sessionId — subscription usage snapshot
   machineProtocolVersion: Record<string, number>; // keyed by machine pubkeyHex — bridge protocol version (>=1 supports model selection)
   historyLoading: Record<string, boolean>;
   refreshing: boolean;
@@ -74,6 +76,7 @@ interface SessionStore {
   setMode: (sessionId: string, mode: AgentMode) => Promise<void>;
   setEffort: (sessionId: string, level: EffortLevel) => Promise<void>;
   setModel: (sessionId: string, model: string) => Promise<void>;
+  refreshUsage: (sessionId: string) => Promise<void>;
   setRemoteSessionModeLocal: (sessionId: string, mode: AgentMode) => void;
   updateConfig: (config: AppConfig) => Promise<void>;
   initEventListeners: () => Promise<void>;
@@ -128,6 +131,7 @@ const defaultConfig: AppConfig = {
   show_mode_badge: true,
   show_commit_badge: true,
   show_model_badge: true,
+  show_usage_badge: true,
 };
 
 const CONFIG_PERSIST_KEY = 'codedeck_config';
@@ -324,6 +328,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSessionModes: {},
   remoteSessionEffort: {},
   remoteSessionModel: {},
+  remoteSessionUsage: {},
   machineProtocolVersion: {},
   historyLoading: {},
   refreshing: false,
@@ -717,6 +722,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       } catch (e) {
         console.error('[SessionStore] Failed to send remote model change:', e);
       }
+    }
+  },
+
+  refreshUsage: async (sessionId) => {
+    const machine = get().getMachineForSession(sessionId);
+    if (!machine) { return; }
+    try {
+      await sendUsageRequest(machine, sessionId);
+    } catch (e) {
+      console.error('[SessionStore] Failed to send usage request:', e);
     }
   },
 
@@ -1405,6 +1420,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           console.warn(`[Store] Pairing rejected by ${machineName}: ${reason ?? 'unknown'}`);
         }
       },
+      // onUsage — subscription usage snapshot pushed by the bridge (on request or heartbeat)
+      (sessionId: string, usage: UsageData) => {
+        set((state) => ({
+          remoteSessionUsage: { ...state.remoteSessionUsage, [sessionId]: usage },
+        }));
+      },
     );
 
     // Restore persisted remote session metadata (titles, etc.) before connecting
@@ -1562,6 +1583,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const { [sessionId]: _t, ...restUsage } = state.tokenUsage;
       const { [sessionId]: _m, ...restModes } = state.remoteSessionModes;
       const { [sessionId]: _e, ...restEffort } = state.remoteSessionEffort;
+      const { [sessionId]: _su, ...restSessionUsage } = state.remoteSessionUsage;
       const { [sessionId]: _h, ...restLoading } = state.historyLoading;
 
       // Clean up grace-period tracking for deleted session
@@ -1574,6 +1596,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tokenUsage: restUsage,
         remoteSessionModes: restModes,
         remoteSessionEffort: restEffort,
+        remoteSessionUsage: restSessionUsage,
         historyLoading: restLoading,
         dismissedSessionIds: dismissed,
         sessionReadyTimestamps: readyTs,

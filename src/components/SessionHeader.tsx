@@ -6,6 +6,7 @@ import { useVoiceModeStore } from '../stores/voiceModeStore';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useOrderedSessionIds } from '../hooks/useOrderedSessionIds';
 import { modelLabel } from '../constants/models';
+import UsageBadge from './UsageBadge';
 import '../styles/header.css';
 
 function formatTokens(usage: TokenUsage): string {
@@ -54,7 +55,7 @@ function useAttentionDirection(sessionId: string | undefined) {
   }, [sessionId, orderedIds, sessions, unreadSessions]);
 }
 
-export default function SessionHeader({ session, remoteSession, isWide }: { session?: Session; remoteSession?: RemoteSessionInfo; isWide: boolean }) {
+export default function SessionHeader({ session, remoteSession, isWide, bridgeSupportsUsage }: { session?: Session; remoteSession?: RemoteSessionInfo; isWide: boolean; bridgeSupportsUsage?: boolean }) {
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const sessionId = session?.id ?? remoteSession?.id;
@@ -130,6 +131,7 @@ export default function SessionHeader({ session, remoteSession, isWide }: { sess
               {showModelBadge && (liveModel ?? remoteSession.model) && (
                 <span className="header-model-badge">{modelLabel(liveModel ?? remoteSession.model)}</span>
               )}
+              <UsageBadge sessionId={remoteSession.id} enabled={!!bridgeSupportsUsage} />
             </div>
             <div className="header-subtitle">{remoteSession.project || remoteSession.cwd}</div>
           </div>

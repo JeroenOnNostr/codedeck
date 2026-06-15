@@ -217,3 +217,93 @@
   color: var(--text-secondary);
   border: 1px solid var(--border-medium);
 }
+
+/* --- Subscription usage panel --- */
+
+.usage-plan-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent, var(--text-secondary));
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.usage-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.usage-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.usage-row-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.usage-row-pct {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.usage-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, var(--text-secondary));
+  transition: width 0.3s ease;
+}
+
+.usage-row-reset {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.usage-row--warning .usage-bar-fill { background: #f59e0b; }
+.usage-row--warning .usage-row-pct { color: #f59e0b; }
+
+.usage-row--critical .usage-bar-fill { background: #ef4444; }
+.usage-row--critical .usage-row-pct { color: #ef4444; }
+
+.usage-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.usage-cost {
+  font-family: var(--font-mono);
+}
+
+.usage-refresh-btn {
+  width: 100%;
+  height: 44px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+}
