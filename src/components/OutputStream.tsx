@@ -71,11 +71,31 @@ function ToolGroupEntry({
         <div className="tool-group-body">
           {item.entries.map((entry, i) => (
             <div key={i} className="tool-group-item">
-              {entry.content}
+              {entry.metadata?.special === 'device_screenshot' && entry.metadata?.imageDataUri ? (
+                <DeviceScreenshot entry={entry} />
+              ) : (
+                entry.content
+              )}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Inline render of a device screenshot delivered by a test session (Phase 3). */
+function DeviceScreenshot({ entry }: { entry: OutputEntry }) {
+  const uri = entry.metadata?.imageDataUri as string | undefined;
+  if (!uri) return <>{entry.content}</>;
+  return (
+    <div className="device-screenshot">
+      <img
+        src={uri}
+        alt={entry.content || 'device screenshot'}
+        style={{ maxWidth: '100%', borderRadius: 6, display: 'block' }}
+      />
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{entry.content}</div>
     </div>
   );
 }

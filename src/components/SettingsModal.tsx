@@ -11,6 +11,7 @@ import { sendSetCredentials } from '../services/bridgeService';
 import { MODELS, DEFAULT_MODEL } from '../constants/models';
 import * as nip19 from 'nostr-tools/nip19';
 import { DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload';
+import MeshSection from './MeshSection';
 import '../styles/modal.css';
 
 function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
@@ -456,6 +457,9 @@ export default function SettingsModal() {
             </button>
           </div>
         </div>
+
+        {/* Mesh (nostr-vpn) — remote on-device testing */}
+        <MeshSection />
 
         {/* Diagnostics */}
         <DiagnosticsSection />

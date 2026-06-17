@@ -16,6 +16,7 @@ export default function NewSessionModal() {
   const [branch, setBranch] = useState('main');
   const [loading, setLoading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [testSession, setTestSession] = useState(false);
 
   const close = () => setNewSessionOpen(false);
 
@@ -64,7 +65,7 @@ export default function NewSessionModal() {
     const handleRemoteCreate = async () => {
       setElapsed(0);
       setLoading(true);
-      await createRemoteSession(machine);
+      await createRemoteSession(machine, testSession);
     };
 
     const handleCancel = () => {
@@ -110,12 +111,18 @@ export default function NewSessionModal() {
               )}
             </>
           ) : (
-            <button
-              className="modal-primary-btn"
-              onClick={handleRemoteCreate}
-            >
-              Start Session
-            </button>
+            <>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={testSession} onChange={(e) => setTestSession(e.target.checked)} />
+                Device test session (enables on-device adb tools)
+              </label>
+              <button
+                className="modal-primary-btn"
+                onClick={handleRemoteCreate}
+              >
+                {testSession ? 'Start Test Session' : 'Start Session'}
+              </button>
+            </>
           )}
         </div>
       </div>

@@ -1,0 +1,17 @@
+# Android 15/16 require shared libraries aligned to a 16 KB max page size. NDK r27 (what we build
+# with) still defaults to 4 KB, so libcodedeck_lib.so fails the ELF alignment check and won't load
+# on 16 KB-page devices (e.g. Pixel 9 / Android 16). Force the linker to 16 KB for every Android
+# target. (NDK r28+ defaults to this and the flag becomes a harmless no-op.)
+# The mesh engine .so gets the same flag via tauri-plugin-mesh/android/build.gradle.kts.
+
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.i686-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

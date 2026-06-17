@@ -93,7 +93,7 @@ interface SessionStore {
   getMachineForSession: (sessionId: string) => RemoteMachine | null;
   requestSessionHistory: (sessionId: string) => Promise<void>;
   requestRefreshSessions: () => void;
-  createRemoteSession: (machine: RemoteMachine) => Promise<void>;
+  createRemoteSession: (machine: RemoteMachine, testSession?: boolean) => Promise<void>;
   deleteRemoteSession: (sessionId: string) => void;
   undoDeleteSession: () => void;
   respondRemotePermission: (sessionId: string, requestId: string, allow: boolean, modifier?: 'always' | 'never') => Promise<void>;
@@ -1518,13 +1518,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }, 3_000);
   },
 
-  createRemoteSession: async (machine) => {
+  createRemoteSession: async (machine, testSession) => {
     try {
       const { default_effort: defaultEffort, model } = get().config;
       await sendCreateSessionRequest(
         machine,
         defaultEffort !== 'auto' ? defaultEffort : undefined,
         model || undefined,
+        testSession,
       );
     } catch (e) {
       console.error('[SessionStore] Failed to create remote session:', e);

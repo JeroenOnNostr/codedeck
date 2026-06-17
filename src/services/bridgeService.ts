@@ -22,6 +22,7 @@ import type {
   RemoteOutputEntry,
   BridgeInboundMessage,
   BridgeOutboundMessage,
+  DeviceConfig,
 } from '../types';
 import { chunkBase64 } from '../utils/imageUtils';
 import { uploadToBlossom, DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload';
@@ -380,8 +381,9 @@ export async function sendCreateSessionRequest(
   machine: RemoteMachine,
   defaultEffort?: EffortLevel,
   model?: string,
+  testSession?: boolean,
 ): Promise<void> {
-  const msg: BridgeOutboundMessage = { type: 'create-session', defaultEffort, model };
+  const msg: BridgeOutboundMessage = { type: 'create-session', defaultEffort, model, testSession };
   await publishToMachine(machine, msg);
 }
 
@@ -498,6 +500,15 @@ export async function sendSetCredentials(
   githubPat?: string | null,
 ): Promise<void> {
   const msg: BridgeOutboundMessage = { type: 'set-credentials', anthropicApiKey, githubPat };
+  await publishToMachine(machine, msg);
+}
+
+/** Send the test-device config to the bridge (which device to target + how to build the app). */
+export async function sendSetDeviceConfig(
+  machine: RemoteMachine,
+  config: DeviceConfig,
+): Promise<void> {
+  const msg: BridgeOutboundMessage = { type: 'set-device-config', config };
   await publishToMachine(machine, msg);
 }
 

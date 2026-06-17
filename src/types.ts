@@ -202,11 +202,40 @@ export type BridgeOutboundMessage =
   | { type: 'model'; sessionId: string; model: string }
   | { type: 'usage-request'; sessionId: string }
   | { type: 'history-request'; sessionId: string; afterSeq?: number }
-  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string }
+  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string; testSession?: boolean }
   | { type: 'refresh-sessions' }
   | { type: 'interrupt'; sessionId: string }
   | { type: 'close-session'; sessionId: string }
   | { type: 'upload-image'; sessionId: string; uploadId: string; filename: string; mimeType: string; base64Data: string; text: string; chunkIndex: number; totalChunks: number }
   | { type: 'upload-image'; sessionId: string; hash: string; url: string; key: string; iv: string; filename: string; mimeType: string; text: string; sizeBytes: number }
   | { type: 'set-credentials'; anthropicApiKey?: string | null; githubPat?: string | null }
+  | { type: 'set-device-config'; config: DeviceConfig }
   | { type: 'pair-request'; npub: string; pubkeyHex: string; label: string; token: string };
+
+/**
+ * Test-device configuration the phone sends to the bridge. Tells the laptop which device to
+ * target over the mesh and how to build the app under test. Persisted on the bridge in globalState.
+ */
+export interface DeviceConfig {
+  /** Friendly label shown in the UI. */
+  label: string;
+  /** adb serial — the device's mesh IP:port (e.g. "10.44.12.34:5555"), or a USB serial in setup. */
+  serial: string;
+  /** Which app the autonomous test loop builds & installs. */
+  appUnderTest: 'kubo' | 'veil' | 'custom';
+  /** For 'custom': the package id to launch (e.g. com.example.dev). */
+  customPackage?: string;
+  /** For 'custom': the shell build command (run in the project dir) that produces an APK. */
+  customBuildCmd?: string;
+  /** Absolute path to the project dir for the app under test (defaults to the bridge workspace). */
+  projectDir?: string;
+}
+
+/** Bridge ack after storing a device config (mirrors CredentialsAckMessage). */
+export interface DeviceConfigAck {
+  type: 'device-config-ack';
+  success: boolean;
+  /** Whether the configured device is currently reachable via `adb devices`. */
+  reachable?: boolean;
+  error?: string;
+}
