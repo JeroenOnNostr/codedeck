@@ -110,6 +110,9 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
   const bridgeOffline = !machineConnected;
   const classes = ['session-card swipe-card', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
 
+  // Show the unread dot only when no live-activity indicator is showing (matches SessionCard).
+  const showUnread = isUnread && session.state !== 'running' && session.state !== 'waiting_permission';
+
   return (
     <div className="swipe-track">
       <div className="swipe-delete-backdrop"><span className="swipe-delete-text">Delete</span></div>
@@ -127,7 +130,7 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
             <span className="session-card-time">{relativeTime(session.lastActivity)}</span>
           </div>
         </div>
-        {isUnread && <div className="session-unread-dot" />}
+        {showUnread && <div className="session-unread-dot" />}
       </div>
     </div>
   );

@@ -6,6 +6,8 @@
  * Falls back to the Web Notification API in browser mock mode.
  */
 
+import { playAttentionPing } from './pingSound';
+
 let tauriNotification: typeof import('@tauri-apps/plugin-notification') | null = null;
 let permissionGranted = false;
 let initialized = false;
@@ -76,6 +78,9 @@ export function notifyIfNeeded(opts: {
 
   const { title, body } = formatNotification(opts.type, opts.toolName);
   sendOsNotification(title, body);
+  // Audible chime alongside the OS notification — covers cases where the OS suppresses
+  // the notification sound (e.g. app in the foreground, silenced channel).
+  playAttentionPing();
 }
 
 function formatNotification(

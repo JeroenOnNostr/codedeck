@@ -120,6 +120,81 @@ describe('sessionStore.addOutput', () => {
   });
 });
 
+describe('sessionStore unread dot', () => {
+  const sessionId = 'unread-session';
+
+  function setVisibility(value: 'visible' | 'hidden') {
+    Object.defineProperty(document, 'visibilityState', { value, configurable: true });
+  }
+
+  beforeEach(() => {
+    useSessionStore.setState({
+      outputs: {},
+      sessions: [],
+      activeSessionId: null,
+      unreadSessions: new Set(),
+      historyLoading: {},
+    });
+    setVisibility('visible');
+  });
+
+  it('clears the unread dot when a session becomes active (app visible)', () => {
+    useSessionStore.setState({ unreadSessions: new Set([sessionId]) });
+    useSessionStore.getState().setActiveSession(sessionId);
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
+  });
+
+  it('does NOT clear the unread dot on setActiveSession while app is hidden', () => {
+    setVisibility('hidden');
+    useSessionStore.setState({ unreadSessions: new Set([sessionId]) });
+    useSessionStore.getState().setActiveSession(sessionId);
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(true);
+  });
+
+  it('does NOT mark the actively-watched (visible) session on stream_end', () => {
+    useSessionStore.setState({ activeSessionId: sessionId });
+    useSessionStore.getState().addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: '', metadata: { stream_end: true },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
+  });
+
+  it('marks a non-active session on stream_end', () => {
+    useSessionStore.setState({ activeSessionId: 'other-session' });
+    useSessionStore.getState().addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: '', metadata: { stream_end: true },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(true);
+  });
+
+  it('marks the active session on stream_end when app is hidden', () => {
+    setVisibility('hidden');
+    useSessionStore.setState({ activeSessionId: sessionId });
+    useSessionStore.getState().addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: '', metadata: { stream_end: true },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(true);
+  });
+
+  it('marks a non-active session on an interactive (needs-input) entry', () => {
+    useSessionStore.setState({ activeSessionId: 'other-session' });
+    useSessionStore.getState().addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: 'Permission needed',
+      metadata: { special: 'permission_request' },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(true);
+  });
+
+  it('does not mark unread while replaying history', () => {
+    useSessionStore.setState({ activeSessionId: 'other-session', historyLoading: { [sessionId]: true } });
+    useSessionStore.getState().addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: 'Permission needed',
+      metadata: { special: 'permission_request' },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
+  });
+});
+
 describe('sessionStore.updateTokenUsage', () => {
   beforeEach(() => {
     useSessionStore.setState({ tokenUsage: {} });

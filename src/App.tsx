@@ -8,6 +8,7 @@ import { generateSecretKey } from 'nostr-tools/pure';
 import { useQuickPromptStore } from './stores/quickPromptStore';
 import { useVoiceModeStore } from './stores/voiceModeStore';
 import { initNotifications, setAppHidden } from './services/notificationService';
+import { initPingAudio } from './services/pingSound';
 import { hasActiveSubscriptions } from './services/bridgeService';
 import { importMeshInvite } from './services/meshClient';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
@@ -126,6 +127,7 @@ export default function App() {
     sessionActions.loadConfig();
     sessionActions.initEventListeners();
     initNotifications();
+    initPingAudio();
     useQuickPromptStore.getState().loadPersisted();
     useVoiceModeStore.getState().loadPersisted();
 

@@ -296,6 +296,11 @@ function mockAgentResponse(sessionId: string, text: string, get: () => SessionSt
   steps.forEach(({ delay, fn }) => setTimeout(fn, delay));
 }
 
+/** True when the app is foreground/visible. Falls back to true outside a DOM (tests). */
+function isAppVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible';
+}
+
 /** Add sessionId to unreadSessions if not already marked. */
 function markUnread(state: SessionStore, sessionId: string): Partial<SessionStore> {
   if (state.unreadSessions.has(sessionId)) return {};
@@ -371,10 +376,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   setPendingRevision: (sessionId) => set({ pendingRevisionSession: sessionId }),
 
-  setActiveSession: (id) => set({ activeSessionId: id }),
+  // Opening/viewing a session clears its unread dot (when the app is foreground).
+  setActiveSession: (id) => set((state) => ({
+    activeSessionId: id,
+    ...(id && isAppVisible() ? clearUnread(state, id) : {}),
+  })),
 
   addOutput: (sessionId, entry) => set((state) => {
     const existing = state.outputs[sessionId] || [];
+    // Don't light the unread dot for the session the user is foreground-watching, or
+    // while we're replaying history into it.
+    const skipMark = (isAppVisible() && state.activeSessionId === sessionId) || !!state.historyLoading[sessionId];
 
     // Streaming: append to last message entry
     if (entry.metadata?.streaming && existing.length > 0) {
@@ -385,13 +397,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...last,
           content: last.content + entry.content,
         };
-        return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) ? markUnread(state, sessionId) : {}) };
+        return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) && !skipMark ? markUnread(state, sessionId) : {}) };
       }
     }
 
     // Stream end marker — don't create an entry, but mark session as needing attention
     if (entry.metadata?.stream_end) {
-      return { ...state, ...markUnread(state, sessionId) };
+      return { ...state, ...(skipMark ? {} : markUnread(state, sessionId)) };
     }
 
     // Accumulate token usage directly in the store (don't mark unread for metrics)
@@ -458,7 +470,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (updated.length > 5000) {
       updated = updated.slice(-5000);
     }
-    return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) && !state.historyLoading[sessionId] ? markUnread(state, sessionId) : {}) };
+    return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) && !skipMark ? markUnread(state, sessionId) : {}) };
   }),
 
   updateSession: (session) => set((state) => ({
@@ -944,8 +956,28 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               }
             }
 
+            // Mark unread on the TRANSITION into a needs-attention state (or first sight of
+            // a session that's already needy) — not on every snapshot, which would re-light
+            // the dot for finished 'idle' sessions the user already read. Never auto-mark
+            // the session the user is foreground-watching.
+            const needsAttention = (st?: string) =>
+              st === 'idle' || st === 'waiting_permission' || st === 'waiting_question';
+            const visible = isAppVisible();
+            let nextUnread: Set<string> | undefined;
+            for (const incoming of dedupedFiltered) {
+              const prev = existingMap.get(incoming.id);
+              const becameNeedy = needsAttention(incoming.state) && (!prev || !needsAttention(prev.state));
+              if (becameNeedy
+                  && !(visible && incoming.id === state.activeSessionId)
+                  && !state.unreadSessions.has(incoming.id)) {
+                if (!nextUnread) nextUnread = new Set(state.unreadSessions);
+                nextUnread.add(incoming.id);
+              }
+            }
+
             return {
               remoteSessions: { ...state.remoteSessions, [machine.pubkeyHex]: merged },
+              ...(nextUnread ? { unreadSessions: nextUnread } : {}),
               remoteSessionModes: Object.keys(newSessionModes).length > 0
                 ? { ...state.remoteSessionModes, ...newSessionModes }
                 : state.remoteSessionModes,
@@ -1011,22 +1043,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             }, i * 500); // 500ms stagger to avoid flooding
           }
 
-          // Mark sessions as unread based on authoritative bridge state
-          const currentUnread = get().unreadSessions;
-          const stateBasedUnread: string[] = [];
-          for (const s of incomingSessions) {
-            const needsAttention = s.state === 'idle' || s.state === 'waiting_permission' || s.state === 'waiting_question';
-            if (needsAttention && !currentUnread.has(s.id)) {
-              stateBasedUnread.push(s.id);
-            }
-          }
-          if (stateBasedUnread.length > 0) {
-            set((state) => {
-              const updated = new Set(state.unreadSessions);
-              for (const id of stateBasedUnread) updated.add(id);
-              return { unreadSessions: updated };
-            });
-          }
+          // Unread marking is handled transition-based inside the merge `set` block above
+          // (compares each session's new state against its previous state), so it no longer
+          // re-lights the dot for finished 'idle' sessions on every snapshot.
         }
       },
       // onOutput
@@ -1049,8 +1068,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         };
         get().addOutput(sessionId, mapped);
 
+        // OS notification + audible ping are both gated by the "Notifications" toggle.
+        const notificationsEnabled = get().config.notifications_enabled;
+
         // Fire OS notification when Claude finishes responding
-        if (entry.metadata?.stream_end) {
+        if (notificationsEnabled && entry.metadata?.stream_end) {
           notifyIfNeeded({
             sessionId,
             activeSessionId: get().activeSessionId,
@@ -1060,7 +1082,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
         // Fire OS notification for interactive entries when app is backgrounded
         const special = entry.metadata?.special as string | undefined;
-        if (special === 'permission_request' || special === 'plan_approval' || special === 'ask_question') {
+        if (notificationsEnabled && (special === 'permission_request' || special === 'plan_approval' || special === 'ask_question')) {
           notifyIfNeeded({
             sessionId,
             activeSessionId: get().activeSessionId,
