@@ -2,12 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { invoke, isTauri } from '../ipc/tauri';
 import { useSessionStore } from '../stores/sessionStore';
 import { sendSetDeviceConfig } from '../services/bridgeService';
-import { persistGet, persistSet } from '../services/persistStore';
+import { persistGet } from '../services/persistStore';
+import { TEST_TARGET_KEY, setTestTarget as persistTestTarget } from '../services/meshClient';
 import type { DeviceConfig } from '../types';
-
-/** Persist key for the per-device opt-in that lets CodeDeck auto-enable Wireless Debugging (adb over
- *  the mesh). OFF by default: only a device the user designates as a TEST TARGET should expose adb. */
-const TEST_TARGET_KEY = 'mesh.testTarget';
 
 /**
  * Mesh (nostr-vpn) settings section.
@@ -182,7 +179,8 @@ export default function MeshSection() {
       <h3 className="modal-section-title">Mesh (remote testing)</h3>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
         Join the encrypted mesh so your office laptop can install &amp; drive dev builds on this phone
-        from anywhere. Import the invite shown by <code>nvpn</code> on the laptop, then connect.
+        from anywhere. The easiest way is to scan the Pair QR from the laptop — it joins the mesh for
+        you. The controls below are for checking status or joining manually.
       </p>
 
       {supported === false && (
@@ -233,7 +231,7 @@ export default function MeshSection() {
               onChange={(e) => {
                 const v = e.target.checked;
                 setTestTarget(v);
-                persistSet(TEST_TARGET_KEY, v).catch(() => {});
+                persistTestTarget(v).catch(() => {});
                 if (v && status?.running) {
                   invoke<{ enabled: boolean }>('plugin:mesh|prepare_adb').then((r) => setWdActive(!!r?.enabled)).catch(() => {});
                 } else if (!v) {
@@ -245,7 +243,7 @@ export default function MeshSection() {
           </div>
 
           <div style={{ marginTop: 12 }}>
-            <label className="modal-label">Mesh invite</label>
+            <label className="modal-label">Mesh invite (manual fallback)</label>
             <input
               className="modal-input"
               value={invite}

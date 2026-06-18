@@ -219,8 +219,20 @@ export type BridgeOutboundMessage =
 export interface DeviceConfig {
   /** Friendly label shown in the UI. */
   label: string;
-  /** adb serial — the device's mesh IP:port (e.g. "10.44.12.34:5555"), or a USB serial in setup. */
-  serial: string;
+  /** Device role. A 'test-target' phone is auto-authorized on the mesh by the bridge and its adb
+   *  serial is derived bridge-side from its pubkey. Absent/'controller' = a normal control phone. */
+  role?: 'controller' | 'test-target';
+  /** adb serial — the device's mesh IP:port (e.g. "10.44.12.34:5555"), or a USB serial in setup.
+   *  Optional: a 'test-target' phone reports its real mesh IP via `meshIp` instead and the bridge
+   *  builds the serial from that. */
+  serial?: string;
+  /** The phone's REAL mesh tunnel IP (e.g. "10.44.126.167"), read from the mesh engine's own state.
+   *  The mesh VpnService has its own key (separate from the app/bridge key), so the bridge cannot
+   *  derive this from the pairing pubkey — the phone is the source of truth. */
+  meshIp?: string;
+  /** The phone's MESH-engine pubkey (hex) — the identity the bridge must authorize on the mesh
+   *  roster (`add-participant`). Distinct from the bridge-pairing pubkey. */
+  meshPubkey?: string;
   /** Which app the autonomous test loop builds & installs. */
   appUnderTest: 'kubo' | 'veil' | 'custom';
   /** For 'custom': the package id to launch (e.g. com.example.dev). */

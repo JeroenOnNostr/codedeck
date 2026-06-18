@@ -9,6 +9,7 @@ import { useQuickPromptStore } from './stores/quickPromptStore';
 import { useVoiceModeStore } from './stores/voiceModeStore';
 import { initNotifications, setAppHidden } from './services/notificationService';
 import { hasActiveSubscriptions } from './services/bridgeService';
+import { importMeshInvite } from './services/meshClient';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke } from '@tauri-apps/api/core';
 import * as nip19 from 'nostr-tools/nip19';
@@ -21,6 +22,7 @@ import NewSessionModal from './components/NewSessionModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import UndoToast from './components/UndoToast';
 import PairToast from './components/PairToast';
+import RolePrompt from './components/RolePrompt';
 import './styles/global.css';
 
 function handleDeepLink(url: string): void {
@@ -78,6 +80,22 @@ function handleDeepLink(url: string): void {
       } catch (err) {
         console.warn('[App] Failed to send pair-request:', err);
       }
+    }
+
+    // One-QR mesh onboarding: if the QR bundled a mesh invite, auto-import it here (single source of
+    // truth — MeshSection only reflects state, it doesn't re-import), then ask the user this device's
+    // role exactly once. Done last so pairing succeeds even if mesh import fails.
+    const meshInvite = parsed.searchParams.get('mesh');
+    const netid = parsed.searchParams.get('netid') || undefined;
+    if (meshInvite) {
+      importMeshInvite(meshInvite)
+        .then((meshImported) => {
+          useUIStore.getState().setRolePrompt({ machine, netid, meshImported });
+        })
+        .catch(() => {
+          // Import failed (e.g. desktop) — still offer the role prompt so the user can proceed.
+          useUIStore.getState().setRolePrompt({ machine, netid, meshImported: false });
+        });
     }
   } catch {
     // Malformed URL — ignore silently
@@ -291,6 +309,7 @@ export default function App() {
       <ErrorBoundary>
       {settingsOpen && <SettingsModal />}
       {newSessionOpen && <NewSessionModal />}
+      <RolePrompt />
       </ErrorBoundary>
     </div>
     </SpeechProvider>
