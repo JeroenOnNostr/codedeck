@@ -1,6 +1,20 @@
 # Problem brief: CodeDeck mesh link goes stale after the phone backgrounds
 
-**Status:** open. Diagnosed 2026-06-19, not yet fixed. Hand-off for a dedicated agent.
+**Status:** RESOLVED 2026-06-19 (CD-035). Fix landed in the contribute-back `nostr-vpn` dep on
+branch `fix/bootstrap-transit-auto-reconnect` (commit 04fd59c, not yet pushed — upstream is
+`mmalmi/nostr-vpn`). The hypothesis below ("CodeDeck-side reconnect on foreground") turned out to be
+the WRONG layer: on mobile `connect_vpn()` only refreshes UI state and `update_peers()` diffs rather
+than re-dialing. Real root cause + fix: configured bootstrap/transit peers had `auto_reconnect=false`,
+so fips-core's `schedule_reconnect()` early-returns on MMP dead-timeout and never re-dials the
+relay-bootstrapped path. Fix = enable `auto_reconnect` for the (small, trusted) bootstrap set on BOTH
+mobile and desktop, keeping it off for ambient learned peers. Verified on-device: a 2-hour-stale
+laptop↔Pixel 9 link recovered within seconds of the patched daemon (relayed→direct UDP) and a 12.7MB
+adb install over the mesh completed. The Tick-based `mesh_refresh` scaffolding stays removed (the fix
+is engine-side). Details: codedeck/DONE.md CD-035. Original diagnosis kept below for history.
+
+---
+
+
 **Scope:** CodeDeck phone app (`codedeck/`) + its embedded mesh engine (`../nostr-vpn`, a contribute-back dependency — **never fork**). Does NOT affect the one-QR onboarding feature (that's done + released).
 
 ## Symptom
