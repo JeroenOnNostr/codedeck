@@ -1,5 +1,9 @@
 # Done — Codedeck
 
+## Hide gray per-turn metadata lines (2026-06-20)
+
+- [x] **CD-038: Light-gray metadata lines clutter the output stream** — The session output rendered intermittent gray system lines between agent messages: `Tokens: N in / N out` (emitted every turn), `Session complete — N turns, $cost`, and the `Claude Code x.y.z (model)` banner. `OutputStream.filteredDisplay` now unconditionally drops these three metadata-only `system` lines (prefix match on `Tokens:` / `Session complete` / `Claude Code`), instead of the old `show_session_metadata` gate — which defaulted on, never covered the per-turn `Tokens:` lines, and is persisted device-side (so flipping the default would not have reached existing installs). Removed the now-inert "Show session metadata" toggle from `SettingsModal`. Frontend-only (no Rust/APK rebuild needed); `tsc --noEmit` clean. (commit `4fa7aa8`, 2026-06-20)
+
 ## Notification dot + mobile ping fix (2026-06-20)
 
 - [x] **CD-036: Notification dot lit while session still running** — The sidebar unread dot persisted while the agent was actively working (the session-list `state` can go stale-`idle` while output streams, and nothing cleared the flag). `sessionStore.addOutput` now clears the unread flag on any non-card, non-`stream_end` output (the agent is working ⇒ not waiting on us); the dot lights only on a permission/plan/question card (blocked) or on `stream_end` (task fully done). Tests added in `__tests__/sessionStore.test.ts`. (commit `5240ea8`, 2026-06-20)
