@@ -60,7 +60,6 @@ export function notifyIfNeeded(opts: {
 }) {
   // Only notify when app is hidden or user is viewing a different session
   if (!appHidden && opts.activeSessionId === opts.sessionId) return;
-  if (!permissionGranted) return;
 
   // Cooldown dedup
   const key = `${opts.sessionId}:${opts.type}`;
@@ -76,11 +75,15 @@ export function notifyIfNeeded(opts: {
     }
   }
 
+  // Audible chime — pure in-app Web Audio, so it works on mobile even when the OS
+  // notification permission was never granted. Plays on every needs-attention event
+  // (blocked or task complete), independent of the OS notification below.
+  playAttentionPing();
+
+  // OS notification requires permission (Android prompt / desktop). Skip if not granted.
+  if (!permissionGranted) return;
   const { title, body } = formatNotification(opts.type, opts.toolName);
   sendOsNotification(title, body);
-  // Audible chime alongside the OS notification — covers cases where the OS suppresses
-  // the notification sound (e.g. app in the foreground, silenced channel).
-  playAttentionPing();
 }
 
 function formatNotification(

@@ -397,7 +397,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           ...last,
           content: last.content + entry.content,
         };
-        return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) && !skipMark ? markUnread(state, sessionId) : {}) };
+        // A card entry (permission/plan/question) marks the session as blocked; any other
+        // output means the agent is actively working, so clear the dot (it's not waiting on us).
+        // The "task fully done" mark is handled by the stream_end branch above.
+        return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) ? (skipMark ? {} : markUnread(state, sessionId)) : clearUnread(state, sessionId)) };
       }
     }
 
@@ -470,7 +473,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (updated.length > 5000) {
       updated = updated.slice(-5000);
     }
-    return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) && !skipMark ? markUnread(state, sessionId) : {}) };
+    // A card entry (permission/plan/question) marks the session as blocked; any other
+    // output means the agent is actively working, so clear the dot (it's not waiting on us).
+    // The "task fully done" mark is handled by the stream_end branch above.
+    return { outputs: { ...state.outputs, [sessionId]: updated }, ...(needsUserInput(entry) ? (skipMark ? {} : markUnread(state, sessionId)) : clearUnread(state, sessionId)) };
   }),
 
   updateSession: (session) => set((state) => ({

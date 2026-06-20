@@ -12,6 +12,8 @@
 - [ ] **CD-005: Create Android notification channel** — Android 8+ requires a notification channel or notifications silently fail. Call `createChannel()` in `notificationService.ts:initNotifications()`.
 - [ ] **CD-006: Add notifications toggle in settings** — No way to disable notifications. Add a `notifications_enabled` flag to config and a toggle in `SettingsModal.tsx`.
 - [ ] **CD-007: Detect session completion** — Currently only `permission_request`, `plan_approval`, and `ask_question` trigger notifications. Add detection for when a remote session finishes.
+- [ ] **CD-036: Notification dot lit while session still running** — The sidebar unread dot persisted while the agent was actively working (stale-`idle` session-list `state` + nothing clearing the flag). Now `addOutput` clears the unread flag on any non-card, non-`stream_end` output (agent is working ⇒ not waiting on us); the dot only shows when blocked (permission/plan/question) or task done (`stream_end`). `sessionStore.ts` `addOutput`; tests in `__tests__/sessionStore.test.ts`.
+- [ ] **CD-037: Audible ping never plays on mobile without OS-notification permission** — `notifyIfNeeded()` returned early on `!permissionGranted` before `playAttentionPing()`, so the in-app Web Audio ping was silenced on Android when the OS notification permission wasn't granted. Reordered so the ping plays independently of OS permission (still gated by the in-app Notifications toggle); OS notification alone requires permission. `notificationService.ts`; tests in `__tests__/notificationService.test.ts`. NOTE: backgrounded WebView suspends Web Audio — background alerts still rely on the OS notification sound (see CD-005 Android channel).
 
 ## Performance
 

@@ -193,6 +193,39 @@ describe('sessionStore unread dot', () => {
     }));
     expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
   });
+
+  it('clears the unread dot when the agent resumes producing output', () => {
+    // A new turn started: ordinary output means the agent is working, not waiting on us.
+    useSessionStore.setState({ activeSessionId: 'other-session', unreadSessions: new Set([sessionId]) });
+    useSessionStore.getState().addOutput(sessionId, makeEntry({
+      entry_type: 'action', content: 'Read: file.rs',
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
+  });
+
+  it('clears a stream_end-marked dot once the agent runs more actions', () => {
+    // Regression: the dot must not persist while a session is actively running.
+    useSessionStore.setState({ activeSessionId: 'other-session' });
+    const store = useSessionStore.getState();
+    store.addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: '', metadata: { stream_end: true },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(true);
+    store.addOutput(sessionId, makeEntry({ entry_type: 'message', content: 'next turn' }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
+  });
+
+  it('still marks unread on a card entry even after working output cleared it', () => {
+    useSessionStore.setState({ activeSessionId: 'other-session' });
+    const store = useSessionStore.getState();
+    store.addOutput(sessionId, makeEntry({ entry_type: 'message', content: 'working...' }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(false);
+    store.addOutput(sessionId, makeEntry({
+      entry_type: 'system', content: 'Plan ready',
+      metadata: { special: 'plan_approval' },
+    }));
+    expect(useSessionStore.getState().unreadSessions.has(sessionId)).toBe(true);
+  });
 });
 
 describe('sessionStore.updateTokenUsage', () => {
