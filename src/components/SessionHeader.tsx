@@ -60,9 +60,8 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const sessionId = session?.id ?? remoteSession?.id;
   const tokenUsage = useSessionStore((s) => sessionId ? s.tokenUsage[sessionId] : undefined);
-  const showModeBadge = useSessionStore((s) => s.config.show_mode_badge);
-  const showModelBadge = useSessionStore((s) => s.config.show_model_badge);
   const liveModel = useSessionStore((s) => sessionId ? s.remoteSessionModel[sessionId] : undefined);
+  const configModel = useSessionStore((s) => s.config.model);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
   const setVoiceEnabled = useVoiceModeStore((s) => s.setEnabled);
   const speaking = useVoiceModeStore((s) => s.speaking);
@@ -117,27 +116,24 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
             </div>
           </div>
           {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
-            <div className="header-tokens">{formatTokens(tokenUsage)}</div>
+            <div className="header-meta">
+              <div className="header-tokens">{formatTokens(tokenUsage)}</div>
+            </div>
           )}
         </>
       ) : remoteSession ? (
         <>
           <div className="header-info">
-            <div className="header-title">
-              {remoteSession.title || remoteSession.slug}
-              {showModeBadge && remoteSession.permissionMode === 'default' && (
-                <span className="header-bypass-badge">YOLO</span>
-              )}
-              {showModelBadge && (liveModel ?? remoteSession.model) && (
-                <span className="header-model-badge">{modelLabel(liveModel ?? remoteSession.model)}</span>
-              )}
-              <UsageBadge sessionId={remoteSession.id} enabled={!!bridgeSupportsUsage} />
-            </div>
+            <div className="header-title">{remoteSession.title || remoteSession.slug}</div>
             <div className="header-subtitle">{remoteSession.project || remoteSession.cwd}</div>
           </div>
-          {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
-            <div className="header-tokens">{formatTokens(tokenUsage)}</div>
-          )}
+          <div className="header-meta">
+            <span className="header-model-badge">{modelLabel(liveModel ?? remoteSession.model ?? configModel)}</span>
+            <UsageBadge sessionId={remoteSession.id} enabled={!!bridgeSupportsUsage} />
+            {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
+              <div className="header-tokens">{formatTokens(tokenUsage)}</div>
+            )}
+          </div>
         </>
       ) : (
         <div className="header-placeholder">CodeDeck</div>

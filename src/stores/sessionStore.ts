@@ -93,7 +93,7 @@ interface SessionStore {
   getMachineForSession: (sessionId: string) => RemoteMachine | null;
   requestSessionHistory: (sessionId: string) => Promise<void>;
   requestRefreshSessions: () => void;
-  createRemoteSession: (machine: RemoteMachine, testSession?: boolean) => Promise<void>;
+  createRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string) => Promise<void>;
   deleteRemoteSession: (sessionId: string) => void;
   undoDeleteSession: () => void;
   respondRemotePermission: (sessionId: string, requestId: string, allow: boolean, modifier?: 'always' | 'never') => Promise<void>;
@@ -1546,13 +1546,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }, 3_000);
   },
 
-  createRemoteSession: async (machine, testSession) => {
+  createRemoteSession: async (machine, testSession, model) => {
     try {
-      const { default_effort: defaultEffort, model } = get().config;
+      const { default_effort: defaultEffort, model: configModel } = get().config;
       await sendCreateSessionRequest(
         machine,
         defaultEffort !== 'auto' ? defaultEffort : undefined,
-        model || undefined,
+        model ?? (configModel || undefined),
         testSession,
       );
     } catch (e) {

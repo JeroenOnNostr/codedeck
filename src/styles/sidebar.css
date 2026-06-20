@@ -141,23 +141,9 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
-.session-card-badge--yolo {
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 2px;
-  padding: 0 3px;
-}
-
 .session-card-badge--committed {
   color: #22c55e;
   background: rgba(34, 197, 94, 0.12);
-}
-
-.session-card-badge--model {
-  color: var(--accent, var(--text-secondary));
-  border: 1px solid var(--border-subtle);
-  border-radius: 2px;
-  padding: 0 3px;
 }
 
 .status-dot {

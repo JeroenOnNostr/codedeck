@@ -33,10 +33,8 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const remoteSessions = useSessionStore((s) => s.remoteSessions);
   const remoteSessionModes = useSessionStore((s) => s.remoteSessionModes);
   const remoteSessionEffort = useSessionStore((s) => s.remoteSessionEffort);
-  const remoteSessionModel = useSessionStore((s) => s.remoteSessionModel);
   const machineProtocolVersion = useSessionStore((s) => s.machineProtocolVersion);
   const defaultMode = useSessionStore((s) => s.config.default_mode);
-  const defaultModel = useSessionStore((s) => s.config.model);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const requestSessionHistory = useSessionStore((s) => s.requestSessionHistory);
   const refreshUsage = useSessionStore((s) => s.refreshUsage);
@@ -120,15 +118,6 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const remoteEffort = remoteSession
     ? (remoteSessionEffort[remoteSession.id] ?? 'auto')
     : undefined;
-  // Only expose the model picker when the serving bridge advertises protocol v1+ (model support).
-  // An old bridge (no protocolVersion) → undefined → InputBar hides the picker rather than
-  // letting a tap silently no-op.
-  const bridgeSupportsModel = remoteMachineKey
-    ? (machineProtocolVersion[remoteMachineKey] ?? 0) >= 1
-    : false;
-  const remoteModel = remoteSession && bridgeSupportsModel
-    ? (remoteSessionModel[remoteSession.id] ?? defaultModel)
-    : undefined;
   // Usage snapshots are a protocol v3+ feature. Gate the header badge so older bridges stay silent.
   const bridgeSupportsUsage = remoteMachineKey
     ? (machineProtocolVersion[remoteMachineKey] ?? 0) >= 3
@@ -167,13 +156,13 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
           {activeSession.state === 'waiting_permission' && activeSession.pending_permissions.length > 0 && (
             <PermissionBar session={activeSession} />
           )}
-          <InputBar sessionId={activeSession.id} mode={activeSession.mode} effort={undefined} model={undefined} />
+          <InputBar sessionId={activeSession.id} mode={activeSession.mode} effort={undefined} />
         </>
       ) : panelMode === 'session' && remoteSession ? (
         <>
           <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
           <OutputStream sessionId={remoteSession.id} />
-          <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} model={remoteModel} />
+          <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} />
         </>
       ) : (
         <>

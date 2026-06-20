@@ -5,7 +5,6 @@ import { useSpeechContext } from '../contexts/SpeechContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { processImageFile } from '../utils/imageUtils';
 import { cycleIndex } from '../utils/cycleIndex';
-import { MODELS, modelLabel } from '../constants/models';
 import QuickPromptBar from './QuickPromptBar';
 import '../styles/input.css';
 
@@ -17,17 +16,14 @@ interface PendingImage {
   sizeBytes: number;
 }
 
-export default function InputBar({ sessionId, mode, effort, model }: { sessionId: string; mode?: AgentMode; effort?: EffortLevel; model?: string }) {
+export default function InputBar({ sessionId, mode, effort }: { sessionId: string; mode?: AgentMode; effort?: EffortLevel }) {
   const [text, setText] = useState('');
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const [sending, setSending] = useState(false);
   const [sendPop, setSendPop] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const modelPickerRef = useRef<HTMLDivElement>(null);
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const setMode = useSessionStore((s) => s.setMode);
   const setEffort = useSessionStore((s) => s.setEffort);
-  const setModel = useSessionStore((s) => s.setModel);
   const pendingRevision = useSessionStore((s) => s.pendingRevisionSession === sessionId);
   const clearPendingRevision = useSessionStore((s) => s.setPendingRevision);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -241,23 +237,6 @@ export default function InputBar({ sessionId, mode, effort, model }: { sessionId
     }
   }, [requestedMax, effort]);
 
-  const selectModel = (id: string) => {
-    setModelMenuOpen(false);
-    if (id !== model) setModel(sessionId, id);
-  };
-
-  // Close the model menu on outside click / touch.
-  useEffect(() => {
-    if (!modelMenuOpen) return;
-    const handler = (e: PointerEvent) => {
-      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
-        setModelMenuOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', handler);
-    return () => document.removeEventListener('pointerdown', handler);
-  }, [modelMenuOpen]);
-
   const canSend = (text.trim() || pendingImage) && !sending && !bridgeOffline;
 
   return (
@@ -337,36 +316,6 @@ export default function InputBar({ sessionId, mode, effort, model }: { sessionId
             >
               {EFFORT_LABELS[effort]}
             </button>
-          )}
-          {model !== undefined && (
-            <div className="model-picker" ref={modelPickerRef}>
-              <button
-                className={`model-btn active${modelMenuOpen ? ' model-menu-open' : ''}`}
-                onPointerDown={e => e.preventDefault()}
-                onClick={() => setModelMenuOpen(o => !o)}
-                aria-haspopup="listbox"
-                aria-expanded={modelMenuOpen}
-                title="Select model"
-              >
-                {modelLabel(model)}
-              </button>
-              {modelMenuOpen && (
-                <div className="model-menu" role="listbox">
-                  {MODELS.map(m => (
-                    <button
-                      key={m.id}
-                      className={`model-menu-item${m.id === model ? ' selected' : ''}`}
-                      role="option"
-                      aria-selected={m.id === model}
-                      onPointerDown={e => e.preventDefault()}
-                      onClick={() => selectModel(m.id)}
-                    >
-                      {m.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           )}
         </div>
 

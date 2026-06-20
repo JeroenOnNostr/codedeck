@@ -83,17 +83,19 @@
   flex-shrink: 0;
 }
 
-.header-bypass-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 3px;
-  padding: 1px 5px;
-  margin-left: 6px;
-  vertical-align: middle;
+/* Right-side meta column: usage chip pinned to the top-right corner,
+   token in/out line stacked beneath it. */
+.header-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: flex-start;
+  gap: 3px;
+  flex-shrink: 0;
+  padding-top: 4px;
 }
 
+/* Current model — always shown, pinned to the top-right corner of the header. */
 .header-model-badge {
   font-size: 10px;
   font-weight: 700;
@@ -101,8 +103,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 3px;
   padding: 1px 5px;
-  margin-left: 6px;
-  vertical-align: middle;
+  white-space: nowrap;
 }
 
 /* Subscription usage chip — tap to open the detail panel. */

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useUIStore } from '../stores/uiStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { MODELS, DEFAULT_MODEL } from '../constants/models';
 import '../styles/modal.css';
 
 export default function NewSessionModal() {
@@ -10,6 +11,7 @@ export default function NewSessionModal() {
   const createRemoteSession = useSessionStore((s) => s.createRemoteSession);
   const sessions = useSessionStore((s) => s.sessions);
   const remoteSessions = useSessionStore((s) => s.remoteSessions);
+  const defaultModel = useSessionStore((s) => s.config.model);
   const [name, setName] = useState('');
   const [group, setGroup] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
@@ -17,6 +19,7 @@ export default function NewSessionModal() {
   const [loading, setLoading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [testSession, setTestSession] = useState(false);
+  const [model, setModel] = useState<string>(defaultModel || DEFAULT_MODEL);
 
   const close = () => setNewSessionOpen(false);
 
@@ -65,7 +68,7 @@ export default function NewSessionModal() {
     const handleRemoteCreate = async () => {
       setElapsed(0);
       setLoading(true);
-      await createRemoteSession(machine, testSession);
+      await createRemoteSession(machine, testSession, model);
     };
 
     const handleCancel = () => {
@@ -112,6 +115,17 @@ export default function NewSessionModal() {
             </>
           ) : (
             <>
+              <label className="modal-label">Model</label>
+              <select
+                className="modal-input"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                style={{ cursor: 'pointer', marginBottom: 16 }}
+              >
+                {MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 12, cursor: 'pointer' }}>
                 <input type="checkbox" checked={testSession} onChange={(e) => setTestSession(e.target.checked)} />
                 Device test session (enables on-device adb tools)

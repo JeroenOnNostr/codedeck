@@ -158,67 +158,6 @@
   border-radius: 6px;
 }
 
-/* --- Per-session model picker (remote sessions only) --- */
-.model-picker {
-  position: relative;
-  width: 100%;
-}
-
-.model-btn {
-  padding: 4px 4px;
-  font-size: 12px;
-  font-weight: 700;
-  border-radius: 4px;
-  cursor: pointer;
-  height: 32px;
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-medium);
-}
-
-.model-btn.model-menu-open {
-  border-color: var(--text-secondary);
-  color: var(--text-primary);
-}
-
-/* Popup opens upward — input bar sits at the bottom of the screen. */
-.model-menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  min-width: 160px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-medium);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  z-index: 50;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.model-menu-item {
-  padding: 10px 12px;
-  font-size: 13px;
-  text-align: left;
-  background: transparent;
-  color: var(--text-secondary);
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.model-menu-item:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
-}
-
-.model-menu-item.selected {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
 .send-btn {
   height: 32px;
   padding: 0 12px;

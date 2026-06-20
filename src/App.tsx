@@ -292,7 +292,7 @@ export default function App() {
             position: 'fixed',
             left: sidebarOpen ? 0 : -280,
             top: 0,
-            bottom: 0,
+            height: 'var(--app-height, 100%)',
             width: 280,
             zIndex: 100,
             transition: 'left 0.2s ease',

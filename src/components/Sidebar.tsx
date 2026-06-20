@@ -6,7 +6,6 @@ import { useSwipeToDelete } from '../hooks/useSwipeToDelete';
 import { parsePublicKey, getDebugInfo } from '../services/nostrService';
 import { subscribe as debugSubscribe, getLogEntries, clearLog } from '../services/debugLog';
 import { relativeTime } from '../utils/relativeTime';
-import { modelLabel } from '../constants/models';
 import { Session, RemoteSessionInfo } from '../types';
 import DmTile from './DmTile';
 import '../styles/sidebar.css';
@@ -73,10 +72,7 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
   const deleteRemoteSession = useSessionStore((s) => s.deleteRemoteSession);
   const hasOutput = useSessionStore((s) => (s.outputs[session.id]?.length ?? 0) > 0);
   const isUnread = useSessionStore((s) => s.unreadSessions.has(session.id));
-  const showModeBadge = useSessionStore((s) => s.config.show_mode_badge);
   const showCommitBadge = useSessionStore((s) => s.config.show_commit_badge);
-  const showModelBadge = useSessionStore((s) => s.config.show_model_badge);
-  const liveModel = useSessionStore((s) => s.remoteSessionModel[session.id]);
   const { ref, touchHandlers } = useSwipeToDelete(() => deleteRemoteSession(session.id));
 
   const isPending = session.id.startsWith('pending:');
@@ -124,8 +120,6 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
           <div className="session-card-path">
             <span className="session-card-path-text">{session.project}</span>
             {(noTerminal || bridgeOffline) && <span className="session-card-badge session-card-badge--offline">offline</span>}
-            {showModeBadge && session.permissionMode === 'default' && <span className="session-card-badge session-card-badge--yolo">YOLO</span>}
-            {showModelBadge && (liveModel ?? session.model) && <span className="session-card-badge session-card-badge--model">{modelLabel(liveModel ?? session.model)}</span>}
             {showCommitBadge && session.committed && <span className="session-card-badge session-card-badge--committed">committed</span>}
             <span className="session-card-time">{relativeTime(session.lastActivity)}</span>
           </div>
@@ -423,7 +417,7 @@ export default function Sidebar() {
       </div>
 
       {/* DMs section — pinned to bottom, 2-tile height */}
-      <div className={`dm-section${panelMode === 'dm' ? ' dm-section--active' : ''}`}>
+      <div className={`dm-section${(panelMode === 'dm' || showNewDm) ? ' dm-section--active' : ''}`}>
         <div className="dm-section-header">
           <span className="dm-section-title">
             <span
