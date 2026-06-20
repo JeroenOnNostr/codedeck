@@ -675,15 +675,18 @@ export default function OutputStream({ sessionId }: { sessionId: string }) {
   const outputs = useSessionStore((s) => s.outputs[sessionId] ?? EMPTY_OUTPUTS);
   const isLoading = useSessionStore((s) => !!s.historyLoading[sessionId]);
   const { display, toggleGroup, isExpanded } = useDisplayEntries(outputs);
-  const showMeta = useSessionStore((s) => s.config.show_session_metadata);
+  // Hide the gray per-turn metadata system lines — token counts, the
+  // "Session complete — N turns, $cost" summary, and the "Claude Code x.y.z"
+  // banner. They accumulate between agent output and are pure visual clutter.
   const filteredDisplay = useMemo(() => {
-    if (showMeta !== false) return display;
     return display.filter((item) => {
       if (item.kind !== 'system') return true;
       const t = item.entry.content;
-      return !t.startsWith('Claude Code') && !t.startsWith('Session complete');
+      return !t.startsWith('Claude Code')
+        && !t.startsWith('Session complete')
+        && !t.startsWith('Tokens:');
     });
-  }, [display, showMeta]);
+  }, [display]);
 
   const listRef = useListRef(null);
   const dynamicHeight = useDynamicRowHeight({ defaultRowHeight: DEFAULT_ROW_HEIGHT });
