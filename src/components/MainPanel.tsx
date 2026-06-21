@@ -11,6 +11,7 @@ import { RemoteSessionInfo } from '../types';
 import SessionHeader from './SessionHeader';
 import OutputStream from './OutputStream';
 import PermissionBar from './PermissionBar';
+import RemotePermissionBar from './RemotePermissionBar';
 import InputBar from './InputBar';
 import DmConversationView from './DmConversationView';
 import ErrorBoundary from './ErrorBoundary';
@@ -162,6 +163,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
         <>
           <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
           <OutputStream sessionId={remoteSession.id} />
+          <RemotePermissionBar sessionId={remoteSession.id} />
           <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} />
         </>
       ) : (

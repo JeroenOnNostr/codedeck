@@ -69,6 +69,22 @@
   color: var(--text-muted);
 }
 
+/* "Waiting for approval" pill — shown in the remote session header while a permission is pending. */
+.header-waiting-pill {
+  display: inline-block;
+  font-weight: 600;
+  color: var(--bg-black, #000);
+  background: var(--warning, #e0a23b);
+  padding: 1px 7px;
+  border-radius: 999px;
+  animation: header-waiting-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes header-waiting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .header-cloning {
   font-size: 12px;
   font-weight: 400;

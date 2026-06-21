@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { OutputEntry } from '../types';
-import { _buildDisplayEntries as buildDisplayEntries } from '../hooks/useDisplayEntries';
+import { _buildDisplayEntries as buildDisplayEntries, findPendingPermission } from '../hooks/useDisplayEntries';
 
 function makeEntry(overrides: Partial<OutputEntry> = {}): OutputEntry {
   return {
@@ -35,6 +35,52 @@ function makeText(content: string, extra: Record<string, unknown> = {}): OutputE
     metadata: { role: 'assistant', ...extra },
   });
 }
+
+function makePermission(id: string, extra: Record<string, unknown> = {}): OutputEntry {
+  return makeEntry({
+    entry_type: 'system',
+    content: 'Permission needed: Bash',
+    metadata: { special: 'permission_request', tool_name: 'Bash', tool_use_id: id, ...extra },
+  });
+}
+
+function makeResultFor(id: string): OutputEntry {
+  return makeEntry({ entry_type: 'tool_result', content: 'ok', metadata: { tool_use_id: id } });
+}
+
+describe('findPendingPermission', () => {
+  it('returns the pending permission when unanswered', () => {
+    const p = findPendingPermission([makeText('working'), makePermission('p1')], undefined);
+    expect(p?.requestId).toBe('p1');
+    expect(p?.toolName).toBe('Bash');
+  });
+
+  it('returns null once a tool_result answers it', () => {
+    const outputs = [makePermission('p1'), makeResultFor('p1')];
+    expect(findPendingPermission(outputs, undefined)).toBeNull();
+  });
+
+  it('returns null when answered optimistically via respondedCards', () => {
+    expect(findPendingPermission([makePermission('p1')], new Set(['p1']))).toBeNull();
+  });
+
+  it('surfaces a permission buried before a long run of sub-agent tool entries', () => {
+    const outputs: OutputEntry[] = [
+      makeText('Now let me have a Plan agent design the implementation.'),
+      makePermission('p1', { subagent: true, agent_label: 'Plan' }),
+      ...Array.from({ length: 50 }, () => makeToolUse('Read', 'Read: file')),
+    ];
+    const p = findPendingPermission(outputs, undefined);
+    expect(p?.requestId).toBe('p1');
+    expect(p?.isSubAgent).toBe(true);
+    expect(p?.agentLabel).toBe('Plan');
+  });
+
+  it('returns null for empty/undefined output', () => {
+    expect(findPendingPermission(undefined, undefined)).toBeNull();
+    expect(findPendingPermission([], undefined)).toBeNull();
+  });
+});
 
 describe('buildDisplayEntries', () => {
   it('collapses text with display_hint collapse into tool group', () => {
@@ -173,5 +219,44 @@ describe('buildDisplayEntries', () => {
     // First text collapses into a tool group, plan shows individually, plan_approval shows individually
     expect(display.some(d => d.kind === 'assistant_message')).toBe(true);
     expect(display.some(d => d.kind === 'plan_approval')).toBe(true);
+  });
+
+  // Regression guard: multiSelect must reach the display so QuestionEntry can render the
+  // toggle+Send UI. It was plumbed into the group but dropped on the single-question path,
+  // which is exactly why multi-select questions looked broken on the phone.
+  function makeQuestion(id: string, idx: number, count: number, multiSelect: boolean): OutputEntry {
+    return makeEntry({
+      entry_type: 'system',
+      content: 'Pick options',
+      metadata: {
+        special: 'ask_question',
+        tool_use_id: id,
+        header: `Q${idx}`,
+        options: [{ label: 'A' }, { label: 'B' }],
+        multiSelect,
+        question_index: idx,
+        question_count: count,
+      },
+    });
+  }
+
+  it('carries multiSelect onto a SINGLE question display', () => {
+    const display = buildDisplayEntries([makeQuestion('q_single', 0, 1, true)]);
+    const q = display.find(d => d.kind === 'question');
+    expect(q).toBeDefined();
+    if (q && q.kind === 'question') expect(q.multiSelect).toBe(true);
+  });
+
+  it('carries per-question multiSelect onto a question GROUP', () => {
+    const display = buildDisplayEntries([
+      makeQuestion('q_grp', 0, 2, false),
+      makeQuestion('q_grp', 1, 2, true),
+    ]);
+    const g = display.find(d => d.kind === 'question_group');
+    expect(g).toBeDefined();
+    if (g && g.kind === 'question_group') {
+      expect(g.questions[0].multiSelect).toBe(false);
+      expect(g.questions[1].multiSelect).toBe(true);
+    }
   });
 });

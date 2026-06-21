@@ -242,6 +242,7 @@ function isFreeTextOption(label: string, index: number, total: number): boolean 
 function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: string }) {
   const sendKeypress = useSessionStore((s) => s.sendRemoteKeypress);
   const sendMessage = useSessionStore((s) => s.sendMessage);
+  const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const markResponded = useSessionStore((s) => s.markCardResponded);
   const clearPendingQuestion = useSessionStore((s) => s.clearPendingQuestion);
   const cardId = item.entry.metadata?.tool_use_id as string | undefined;
@@ -249,6 +250,8 @@ function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: 
   const [showTextInput, setShowTextInput] = useState(false);
   const [textValue, setTextValue] = useState('');
   const [sending, setSending] = useState(false);
+  // Multi-select: indices the user has toggled on (sent as one comma-joined answer on "Send").
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const textInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus when text input appears
@@ -278,10 +281,33 @@ function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: 
   }
 
   const hasOptions = item.options && item.options.length > 0;
+  const isMulti = !!item.multiSelect && !!hasOptions;
   // Find which option (if any) is the "type your own" variant
   const freeTextOptionIndex = hasOptions
     ? item.options!.findIndex((opt, i) => isFreeTextOption(opt.label, i, item.options!.length))
     : -1;
+
+  const toggleSelected = (i: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+
+  // Multi-select: send all chosen labels as ONE comma-joined answer through the question-input
+  // path (answerQuestion), which the bridge matches to this question and parses as multi-select.
+  const handleMultiSend = async () => {
+    if (selected.size === 0 || sending) return;
+    setSending(true);
+    try {
+      const labels = [...selected].sort((a, b) => a - b).map((i) => item.options![i].label);
+      if (cardId) markResponded(sessionId, cardId);
+      await answerQuestion(sessionId, labels.join(', '));
+    } finally {
+      setSending(false);
+    }
+  };
 
   const handleTextSubmit = async () => {
     const trimmed = textValue.trim();
@@ -332,6 +358,44 @@ function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: 
     );
   }
 
+  // Multi-select: toggle options, then send all chosen labels at once via "Send".
+  if (isMulti) {
+    return (
+      <div className="question-card">
+        {item.header && <div className="question-header">{item.header}</div>}
+        <div className="question-text">{item.entry.content}</div>
+        <div className="question-multi-hint">Select all that apply</div>
+        <div className="question-options">
+          {item.options!.map((opt, i) => {
+            const on = selected.has(i);
+            return (
+              <button
+                key={i}
+                className={`question-option-btn question-option-toggle${on ? ' question-option-on' : ''}`}
+                aria-pressed={on}
+                onClick={() => toggleSelected(i)}
+                disabled={sending}
+              >
+                <span className="question-option-check">{on ? '☑' : '☐'}</span>
+                <span className="question-option-label">{opt.label}</span>
+                {opt.description && (
+                  <span className="question-option-desc">{opt.description}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          className="question-multi-send"
+          onClick={handleMultiSend}
+          disabled={selected.size === 0 || sending}
+        >
+          {sending ? 'Sending...' : `Send${selected.size > 0 ? ` (${selected.size})` : ''}`}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="question-card">
       {item.header && <div className="question-header">{item.header}</div>}
@@ -377,6 +441,7 @@ function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: 
 function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; sessionId: string }) {
   const sendKeypress = useSessionStore((s) => s.sendRemoteKeypress);
   const sendMessage = useSessionStore((s) => s.sendMessage);
+  const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const markResponded = useSessionStore((s) => s.markCardResponded);
   const isCardResponded = useSessionStore((s) => s.isCardResponded);
   const clearPendingQuestion = useSessionStore((s) => s.clearPendingQuestion);
@@ -401,6 +466,8 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
   const [showTextInput, setShowTextInput] = useState(false);
   const [textValue, setTextValue] = useState('');
   const [sending, setSending] = useState(false);
+  // Multi-select toggles for the ACTIVE question (reset whenever the active tab changes).
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const textInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -415,8 +482,12 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
       setActiveTab(firstUnanswered);
       setShowTextInput(false);
       setTextValue('');
+      setSelected(new Set());
     }
   }, [firstUnanswered, allAnswered]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear multi-select toggles when the user manually switches tabs.
+  useEffect(() => { setSelected(new Set()); }, [activeTab]);
 
   // Completed state (from bridge tool_result)
   if (item.answered) {
@@ -452,6 +523,7 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
 
   const activeQuestion = questions[activeTab];
   const hasOptions = activeQuestion.options && activeQuestion.options.length > 0;
+  const isMulti = !!activeQuestion.multiSelect && !!hasOptions;
   const freeTextOptionIndex = hasOptions
     ? activeQuestion.options!.findIndex((opt, i) => isFreeTextOption(opt.label, i, activeQuestion.options!.length))
     : -1;
@@ -463,6 +535,28 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
       clearPendingQuestion(sessionId);
       markResponded(sessionId, `${toolUseId}:q${activeTab}`);
       sendKeypress(sessionId, String(optionIndex + 1), 'question');
+    }
+  };
+
+  const toggleSelected = (i: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+
+  // Multi-select: send the active question's chosen labels as one comma-joined answer. The bridge
+  // matches it to the first unanswered question (= activeTab) and advances the group.
+  const handleMultiSend = async () => {
+    if (selected.size === 0 || sending) return;
+    setSending(true);
+    try {
+      const labels = [...selected].sort((a, b) => a - b).map((i) => activeQuestion.options![i].label);
+      markResponded(sessionId, `${toolUseId}:q${activeTab}`);
+      await answerQuestion(sessionId, labels.join(', '));
+    } finally {
+      setSending(false);
     }
   };
 
@@ -530,6 +624,37 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
       <div className="question-text">{activeQuestion.entry.content}</div>
       {(!hasOptions || showTextInput) ? (
         textInput
+      ) : isMulti ? (
+        <>
+          <div className="question-multi-hint">Select all that apply</div>
+          <div className="question-options">
+            {activeQuestion.options!.map((opt, i) => {
+              const on = selected.has(i);
+              return (
+                <button
+                  key={i}
+                  className={`question-option-btn question-option-toggle${on ? ' question-option-on' : ''}`}
+                  aria-pressed={on}
+                  onClick={() => toggleSelected(i)}
+                  disabled={sending}
+                >
+                  <span className="question-option-check">{on ? '☑' : '☐'}</span>
+                  <span className="question-option-label">{opt.label}</span>
+                  {opt.description && (
+                    <span className="question-option-desc">{opt.description}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            className="question-multi-send"
+            onClick={handleMultiSend}
+            disabled={selected.size === 0 || sending}
+          >
+            {sending ? 'Sending...' : `Send${selected.size > 0 ? ` (${selected.size})` : ''}`}
+          </button>
+        </>
       ) : (
         <>
           <div className="question-options">
@@ -581,9 +706,13 @@ function PermissionRequestEntry({ item, sessionId }: { item: PermissionRequestDi
     markResponded(sessionId, item.requestId);
     respondRemotePermission(sessionId, item.requestId, allow, modifier);
   };
+  const originNote = item.isSubAgent
+    ? `${item.agentLabel ? `${item.agentLabel} agent` : 'Sub-agent'} wants to run this`
+    : null;
   return (
     <div className="permission-request-card" aria-live="polite">
       <div className="plan-approval-label">{item.toolName}</div>
+      {originNote && <div className="output-system" style={{ margin: '2px 0', opacity: 0.8 }}>{originNote}</div>}
       <div className="output-system" style={{ margin: '4px 0 8px' }}>{item.description}</div>
       <div className="plan-approval-actions">
         <button className="btn-allow" onClick={() => respond(true)}>Allow</button>

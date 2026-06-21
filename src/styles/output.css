@@ -413,6 +413,55 @@
   color: var(--accent);
 }
 
+/* --- Multi-select question (toggle options + Send) --- */
+
+.question-multi-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 2px 0 6px;
+}
+
+.question-option-toggle {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.question-option-toggle .question-option-check {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.question-option-on {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.question-option-on .question-option-check {
+  color: var(--accent);
+}
+
+.question-multi-send {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.question-multi-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* --- Question group tab bar --- */
 
 .question-tabs {

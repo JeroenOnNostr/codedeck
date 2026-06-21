@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { OutputEntry } from '../types';
+import { useSessionStore } from '../stores/sessionStore';
 
 export interface DisplayEntryBase {
   /** Original index range in the source array, used for stable keys */
@@ -48,6 +49,8 @@ export interface QuestionDisplay extends DisplayEntryBase {
   entry: OutputEntry;
   header?: string;
   options?: Array<{ label: string; description?: string }>;
+  /** True when the user may pick multiple options (sent as a comma-joined answer). */
+  multiSelect?: boolean;
   answered?: string;
 }
 
@@ -71,6 +74,10 @@ export interface PermissionRequestDisplay extends DisplayEntryBase {
   toolName: string;
   description: string;
   requestId: string;
+  /** True when the request originates from a sub-agent (Bridge sets metadata.subagent). */
+  isSubAgent?: boolean;
+  /** Best-effort sub-agent type label (e.g. 'Plan'), from Bridge metadata.agent_label. */
+  agentLabel?: string;
 }
 
 export type DisplayEntry =
@@ -166,6 +173,7 @@ function buildDisplayEntries(outputs: OutputEntry[]): DisplayEntry[] {
         entry: q.entry,
         header: q.header,
         options: q.options,
+        multiSelect: q.multiSelect,
         sourceStart: pendingQuestionStart,
         answered: answerContent,
       });
@@ -258,6 +266,8 @@ function buildDisplayEntries(outputs: OutputEntry[]): DisplayEntry[] {
         toolName: (entry.metadata?.tool_name as string) ?? '',
         description: entry.content,
         requestId: toolUseId ?? '',
+        isSubAgent: !!entry.metadata?.subagent,
+        agentLabel: entry.metadata?.agent_label as string | undefined,
         sourceStart: i,
       });
       continue;
@@ -323,4 +333,53 @@ export function useDisplayEntries(outputs: OutputEntry[]) {
   const isExpanded = useCallback((sourceStart: number) => expanded.has(sourceStart), [expanded]);
 
   return { display, toggleGroup, isExpanded };
+}
+
+export interface PendingRemotePermission {
+  requestId: string;
+  toolName: string;
+  description: string;
+  isSubAgent: boolean;
+  agentLabel?: string;
+}
+
+/**
+ * Pure scan: find the latest still-pending permission request in a remote session's output stream
+ * — the most recent `permission_request` entry that has neither received a tool_result (answeredMap)
+ * nor been answered optimistically (respondedCards). Exported for unit testing; returns null when
+ * nothing is pending.
+ */
+export function findPendingPermission(
+  outputs: OutputEntry[] | undefined,
+  respondedCards: Set<string> | undefined,
+): PendingRemotePermission | null {
+  if (!outputs || outputs.length === 0) return null;
+  const answered = collectAnsweredToolUseIds(outputs);
+  for (let i = outputs.length - 1; i >= 0; i--) {
+    const entry = outputs[i];
+    if (entry.metadata?.special !== 'permission_request') continue;
+    const toolUseId = entry.metadata?.tool_use_id as string | undefined;
+    if (!toolUseId) continue;
+    if (answered.has(toolUseId) || respondedCards?.has(toolUseId)) continue;
+    return {
+      requestId: toolUseId,
+      toolName: (entry.metadata?.tool_name as string) ?? '',
+      description: entry.content,
+      isSubAgent: !!entry.metadata?.subagent,
+      agentLabel: entry.metadata?.agent_label as string | undefined,
+    };
+  }
+  return null;
+}
+
+/**
+ * Derive the latest still-pending permission for a remote session. Used to pin an always-visible
+ * RemotePermissionBar above the input — remote sessions have no PermissionBar and the inline card
+ * can be buried below a large collapsed sub-agent group (which is exactly how a permission prompt
+ * goes unseen and deadlocks the session).
+ */
+export function usePendingRemotePermission(sessionId: string): PendingRemotePermission | null {
+  const outputs = useSessionStore((s) => s.outputs[sessionId]);
+  const respondedCards = useSessionStore((s) => s.respondedCards.get(sessionId));
+  return useMemo(() => findPendingPermission(outputs, respondedCards), [outputs, respondedCards]);
 }

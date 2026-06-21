@@ -125,7 +125,13 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
         <>
           <div className="header-info">
             <div className="header-title">{remoteSession.title || remoteSession.slug}</div>
-            <div className="header-subtitle">{remoteSession.project || remoteSession.cwd}</div>
+            <div className="header-subtitle">
+              {remoteSession.state === 'waiting_permission'
+                ? <span className="header-waiting-pill">Waiting for approval</span>
+                : remoteSession.state === 'waiting_question'
+                ? <span className="header-waiting-pill">Waiting for your answer</span>
+                : (remoteSession.project || remoteSession.cwd)}
+            </div>
           </div>
           <div className="header-meta">
             <span className="header-model-badge">{modelLabel(liveModel ?? remoteSession.model ?? configModel)}</span>

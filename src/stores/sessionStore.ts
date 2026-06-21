@@ -98,6 +98,10 @@ interface SessionStore {
   undoDeleteSession: () => void;
   respondRemotePermission: (sessionId: string, requestId: string, allow: boolean, modifier?: 'always' | 'never') => Promise<void>;
   sendRemoteKeypress: (sessionId: string, key: string, context?: 'plan-approval' | 'exit-plan' | 'question') => Promise<void>;
+  /** Send a free-text answer to the active pending AskUserQuestion (used by multi-select "Send").
+   *  Routes straight through question-input so it works regardless of the pendingQuestions flag —
+   *  the bridge matches it to the most-recent unanswered question by history scan. */
+  answerQuestion: (sessionId: string, text: string) => Promise<void>;
   /** Re-establish bridge subscriptions for all machines (call on foreground resume). */
   reconnectBridge: () => void;
   /** Track that a card (permission, plan approval, question) has been responded to.
@@ -908,7 +912,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               }
               if (prev.title === incoming.title && prev.lastActivity === incoming.lastActivity
                   && prev.lineCount === incoming.lineCount && prev.project === incoming.project
-                  && prev.cwd === incoming.cwd && prev.committed === incoming.committed) {
+                  && prev.cwd === incoming.cwd && prev.committed === incoming.committed
+                  && prev.state === incoming.state) {
                 return prev; // unchanged — keep same reference
               }
               return { ...prev, ...incoming, title: incoming.title ?? prev.title }; // merge updates, preserve non-null title
@@ -1093,7 +1098,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             sessionId,
             activeSessionId: get().activeSessionId,
             type: special,
-            toolName: special === 'permission_request' ? (entry.metadata?.toolName as string) : undefined,
+            toolName: special === 'permission_request' ? (entry.metadata?.tool_name as string) : undefined,
           });
         }
 
@@ -1727,6 +1732,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await sendRemoteKeypress(machine, sessionId, key, context);
     } catch (e) {
       console.error('[SessionStore] Failed to send keypress:', e);
+    }
+  },
+
+  answerQuestion: async (sessionId, text) => {
+    set((state) => clearUnread(state, sessionId));
+    const pending = get().pendingQuestions.get(sessionId);
+    get().clearPendingQuestion(sessionId);
+    const machine = get().getMachineForSession(sessionId);
+    if (!machine) {
+      console.warn('[SessionStore] answerQuestion: no machine for session', sessionId);
+      return;
+    }
+    try {
+      await sendRemoteQuestionInput(machine, sessionId, text, pending?.optionCount ?? 0);
+    } catch (e) {
+      console.error('[SessionStore] Failed to send question answer:', e);
     }
   },
 
