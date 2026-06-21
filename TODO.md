@@ -27,7 +27,6 @@
 ## UX / Layout
 
 - [ ] **CD-015: Option to move session column to right side** — Add a setting to move the left session sidebar to the right-hand side of the screen.
-- [ ] **CD-016: Fix microphone button functionality** — Microphone button is not working correctly; investigate and fix speech input.
 - [ ] **CD-017: Remove local sessions functionality** — Strip out local session support; Codedeck should only handle remote/bridge sessions.
 - [ ] **CD-019: Clean up settings menu** — Audit SettingsModal for unused or obsolete options and remove them.
 
