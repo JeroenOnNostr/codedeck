@@ -28,6 +28,22 @@ export const MODELS: ModelInfo[] = [
 /** Default model for new sessions and fresh installs. */
 export const DEFAULT_MODEL = 'claude-opus-4-8';
 
+/** Standard Claude context window. */
+const CONTEXT_WINDOW_DEFAULT = 200_000;
+/** The 1M-token context beta (model IDs carrying a `[1m]` / `-1m` marker). */
+const CONTEXT_WINDOW_1M = 1_000_000;
+
+/**
+ * Max context window (tokens) for a model ID — the denominator for the context-usage %.
+ * Every current Claude model is 200K except the 1M-context beta variants, whose IDs
+ * carry a `[1m]` or `-1m` marker (e.g. `claude-opus-4-8[1m]`). Unknown models default
+ * to 200K, which is the safe/common case.
+ */
+export function modelContextWindow(id: string | undefined): number {
+  if (!id) { return CONTEXT_WINDOW_DEFAULT; }
+  return /\[1m\]|-1m\b/i.test(id) ? CONTEXT_WINDOW_1M : CONTEXT_WINDOW_DEFAULT;
+}
+
 /** Compact label for a model ID — falls back to a trimmed ID for unknown models. */
 export function modelLabel(id: string | undefined): string {
   if (!id) return '?';

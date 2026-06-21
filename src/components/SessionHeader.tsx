@@ -1,20 +1,19 @@
 import { useMemo } from 'react';
-import { Session, TokenUsage, RemoteSessionInfo } from '../types';
+import { Session, RemoteSessionInfo } from '../types';
 import { useUIStore } from '../stores/uiStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useVoiceModeStore } from '../stores/voiceModeStore';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useOrderedSessionIds } from '../hooks/useOrderedSessionIds';
-import { modelLabel } from '../constants/models';
+import { modelLabel, modelContextWindow } from '../constants/models';
 import UsageBadge from './UsageBadge';
 import '../styles/header.css';
 
-function formatTokens(usage: TokenUsage): string {
-  const fmt = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n);
-  if (usage.total_cost_usd > 0) {
-    return `${fmt(usage.input_tokens)} in / ${fmt(usage.output_tokens)} out · $${usage.total_cost_usd.toFixed(2)}`;
-  }
-  return `${fmt(usage.input_tokens)} in / ${fmt(usage.output_tokens)} out`;
+/** Context-window occupancy as an integer % of the model's max, or null if unknown. */
+function contextPct(contextTokens: number | undefined, modelId: string | undefined): number | null {
+  if (typeof contextTokens !== 'number' || contextTokens <= 0) { return null; }
+  const max = modelContextWindow(modelId);
+  return Math.min(100, Math.round((contextTokens / max) * 100));
 }
 
 /**
@@ -59,7 +58,7 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const sessionId = session?.id ?? remoteSession?.id;
-  const tokenUsage = useSessionStore((s) => sessionId ? s.tokenUsage[sessionId] : undefined);
+  const contextTokens = useSessionStore((s) => sessionId ? s.remoteSessionContext[sessionId] : undefined);
   const liveModel = useSessionStore((s) => sessionId ? s.remoteSessionModel[sessionId] : undefined);
   const configModel = useSessionStore((s) => s.config.model);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
@@ -67,6 +66,15 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   const speaking = useVoiceModeStore((s) => s.speaking);
   const isTouchDevice = useMediaQuery('(pointer: coarse)');
   const attention = useAttentionDirection(sessionId);
+  const sendMessage = useSessionStore((s) => s.sendMessage);
+
+  // /compact summarizes the conversation to relieve context pressure on long sessions.
+  // Input is passed verbatim to the SDK by the bridge, so sending the slash command works
+  // exactly as typing it would. Only offered for remote (bridge-backed) sessions.
+  const handleCompact = () => {
+    if (!remoteSession) return;
+    void sendMessage(remoteSession.id, '/compact');
+  };
 
   return (
     <div className="session-header">
@@ -102,6 +110,20 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
         </button>
       )}
 
+      {remoteSession && (
+        <button
+          className="header-btn header-compact"
+          onClick={handleCompact}
+          aria-label="Compact conversation"
+          title="Compact conversation (/compact) — summarize history to free up context"
+        >
+          {/* compress / merge-to-center icon */}
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M4 9h4V5h2v6H4V9zm10 0V5h2v4h4v2h-6V9zM4 13h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z"/>
+          </svg>
+        </button>
+      )}
+
       {session ? (
         <>
           <div className="header-info">
@@ -115,11 +137,6 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
               {session.group}:{session.workspace_path} · {session.branch}
             </div>
           </div>
-          {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
-            <div className="header-meta">
-              <div className="header-tokens">{formatTokens(tokenUsage)}</div>
-            </div>
-          )}
         </>
       ) : remoteSession ? (
         <>
@@ -134,11 +151,14 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
             </div>
           </div>
           <div className="header-meta">
-            <span className="header-model-badge">{modelLabel(liveModel ?? remoteSession.model ?? configModel)}</span>
-            <UsageBadge sessionId={remoteSession.id} enabled={!!bridgeSupportsUsage} />
-            {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
-              <div className="header-tokens">{formatTokens(tokenUsage)}</div>
-            )}
+            <span className="header-model-badge">
+              {modelLabel(liveModel ?? remoteSession.model ?? configModel)}
+              {(() => {
+                const ctx = contextPct(contextTokens, liveModel ?? remoteSession.model ?? configModel);
+                return ctx !== null ? <span className="header-context-pct"> · {ctx}%</span> : null;
+              })()}
+            </span>
+            <UsageBadge enabled={!!bridgeSupportsUsage} />
           </div>
         </>
       ) : (

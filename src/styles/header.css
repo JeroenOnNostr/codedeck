@@ -91,16 +91,8 @@
   color: var(--text-muted);
 }
 
-.header-tokens {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  text-align: right;
-  flex-shrink: 0;
-}
-
-/* Right-side meta column: usage chip pinned to the top-right corner,
-   token in/out line stacked beneath it. */
+/* Right-side meta column: model+context badge on top, usage chip stacked beneath,
+   both pinned to the top-right corner. */
 .header-meta {
   display: flex;
   flex-direction: column;
@@ -122,19 +114,37 @@
   white-space: nowrap;
 }
 
-/* Subscription usage chip — tap to open the detail panel. */
+/* Context-window occupancy %, bundled into the model badge — secondary to the model name. */
+.header-model-badge .header-context-pct {
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+/* Subscription usage chip — two rows (5h / wk), tap to open the detail panel. */
 .header-usage-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
   font-size: 10px;
   font-weight: 700;
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-subtle);
   border-radius: 3px;
-  padding: 1px 5px;
-  margin-left: 6px;
-  vertical-align: middle;
+  padding: 2px 5px;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.header-usage-badge .usage-badge-row {
+  display: block;
+}
+
+/* Time-until-reset suffix on each row — secondary to the percentage. */
+.header-usage-badge .usage-badge-reset {
+  font-weight: 500;
+  opacity: 0.65;
 }
 
 .header-usage-badge.usage-warning {
