@@ -158,6 +158,17 @@
   border-radius: 6px;
 }
 
+.stt-error-hint {
+  margin: 0 8px 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--accent-warning, var(--border-medium));
+  border-radius: 6px;
+}
+
 .send-btn {
   height: 32px;
   padding: 0 12px;

@@ -20,6 +20,7 @@ export interface SpeechContextValue {
   interimTranscript: string;
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
+  recheckAvailability: () => Promise<void>;
   error: string | null;
   /** Set the voice command handler (high priority). Pass null to clear. */
   setVoiceHandler: (handler: ((transcript: string) => void) | null) => void;

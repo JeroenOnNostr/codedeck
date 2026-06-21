@@ -11,9 +11,11 @@ import android.speech.SpeechRecognizer
 import android.webkit.WebView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import app.tauri.PermissionState
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
+import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
@@ -38,7 +40,8 @@ class SpeechRecognizerPlugin(private val activity: Activity) : Plugin(activity) 
     private var available = false
 
     companion object {
-        private const val PERMISSION_REQUEST_CODE = 9001
+        // Must match the alias on the @TauriPlugin Permission annotation below.
+        private const val MIC_ALIAS = "microphone"
     }
 
     override fun load(webView: WebView) {
@@ -148,28 +151,25 @@ class SpeechRecognizerPlugin(private val activity: Activity) : Plugin(activity) 
 
     @Command
     fun requestPermission(invoke: Invoke) {
-        val hasPermission = ContextCompat.checkSelfPermission(
-            activity,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (hasPermission) {
+        // Already granted — resolve immediately.
+        if (getPermissionState(MIC_ALIAS) == PermissionState.GRANTED) {
             val ret = JSObject()
             ret.put("granted", true)
             invoke.resolve(ret)
             return
         }
 
-        // Request permission from the user
-        ActivityCompat.requestPermissions(
-            activity,
-            arrayOf(Manifest.permission.RECORD_AUDIO),
-            PERMISSION_REQUEST_CODE
-        )
+        // Hold the invoke open and let Tauri drive the OS dialog. The result is
+        // delivered to micPermissionCallback once the user actually responds —
+        // no fixed-delay polling from the frontend.
+        requestPermissionForAlias(MIC_ALIAS, invoke, "micPermissionCallback")
+    }
 
-        // Permission dialog is async — resolve false for now, frontend will retry
+    @PermissionCallback
+    fun micPermissionCallback(invoke: Invoke) {
+        val granted = getPermissionState(MIC_ALIAS) == PermissionState.GRANTED
         val ret = JSObject()
-        ret.put("granted", false)
+        ret.put("granted", granted)
         invoke.resolve(ret)
     }
 

@@ -17,6 +17,7 @@ interface UseSpeechRecognitionReturn {
   interimTranscript: string;
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
+  recheckAvailability: () => Promise<void>;
   error: string | null;
 }
 
@@ -37,28 +38,37 @@ export function useSpeechRecognition(
   const finalDeliveredRef = useRef(false);
   const lastInterimRef = useRef('');
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True between stopListening() and the next terminal event — used to tell a
+  // benign "no result" that followed our stop apart from one that arose mid-listen.
+  const stopRequestedRef = useRef(false);
+  // Mirror of interimTranscript readable from event-listener closures without
+  // re-subscribing (the listeners are registered once, keyed on `available`).
+  const interimTranscriptRef = useRef('');
+  interimTranscriptRef.current = interimTranscript;
 
-  // Check availability on mount (Tauri only)
-  useEffect(() => {
-    if (MOCK_STT_ENABLED) return; // already set available=true
-    if (!isTauri()) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await invoke<{ available: boolean }>(
-          'plugin:speech-recognizer|is_available'
-        );
-        if (!cancelled && result) {
-          setAvailable(result.available);
-        }
-      } catch {
-        // Plugin not available
-      }
-    })();
-
-    return () => { cancelled = true; };
+  // Re-query the native plugin for availability. Exposed so the UI can retry
+  // (the recognizer can report unavailable transiently, e.g. while the speech
+  // service updates), and called on mount + when the window regains focus.
+  const recheckAvailability = useCallback(async () => {
+    if (MOCK_STT_ENABLED || !isTauri()) return;
+    try {
+      const result = await invoke<{ available: boolean }>(
+        'plugin:speech-recognizer|is_available'
+      );
+      if (result) setAvailable(result.available);
+    } catch {
+      // Plugin not available
+    }
   }, []);
+
+  // Check availability on mount and whenever the window regains focus.
+  useEffect(() => {
+    if (MOCK_STT_ENABLED || !isTauri()) return;
+    void recheckAvailability();
+    const onFocus = () => { void recheckAvailability(); };
+    window.addEventListener('focus', onFocus);
+    return () => { window.removeEventListener('focus', onFocus); };
+  }, [recheckAvailability]);
 
   // Set up plugin event listeners (Tauri mobile only)
   useEffect(() => {
@@ -100,19 +110,38 @@ export function useSpeechRecognition(
           (data: RecognitionError) => {
             if (!mounted) return;
             console.debug('[STT] Error received:', data.code, data.error);
-            // ERROR_CLIENT (5) and ERROR_NO_MATCH (7) commonly fire after
-            // programmatic stopListening() — not real errors, but the
-            // definitive signal that onResults() won't come
-            const isStopSideEffect = data.code === 5 || data.code === 7;
-            if (isStopSideEffect) {
+            // Android SpeechRecognizer.ERROR_* codes. These three are benign
+            // "no result" outcomes rather than failures:
+            //   5 ERROR_CLIENT       — fires after a programmatic stop/cancel
+            //   6 ERROR_SPEECH_TIMEOUT — user stopped without speaking
+            //   7 ERROR_NO_MATCH     — speech ended but nothing was recognized
+            // All other codes (audio/network/server/busy/permissions) are real
+            // failures the user should see. We only swallow the benign codes
+            // when WE initiated the stop (stopRequestedRef); a benign-looking
+            // code that arrives mid-listen still surfaces as "didn't catch that".
+            const isBenignCode = data.code === 5 || data.code === 6 || data.code === 7;
+            if (isBenignCode && stopRequestedRef.current) {
               if (!finalDeliveredRef.current && lastInterimRef.current) {
                 finalDeliveredRef.current = true;
                 onFinalResultRef.current(lastInterimRef.current);
                 lastInterimRef.current = '';
               }
+            } else if (isBenignCode) {
+              // Mid-listen no-match/timeout with nothing captured — gentle hint.
+              if (!lastInterimRef.current && !interimTranscriptRef.current) {
+                setError("Didn't catch that — try again.");
+              } else if (!finalDeliveredRef.current) {
+                // We had interim text; keep it rather than dropping silently.
+                finalDeliveredRef.current = true;
+                onFinalResultRef.current(
+                  lastInterimRef.current || interimTranscriptRef.current
+                );
+                lastInterimRef.current = '';
+              }
             } else {
-              setError(data.error);
+              setError(data.error || 'Speech recognition error');
             }
+            stopRequestedRef.current = false;
             setIsListening(false);
             setInterimTranscript('');
             if (stopTimeoutRef.current) {
@@ -152,6 +181,8 @@ export function useSpeechRecognition(
   const startListening = useCallback(async () => {
     setError(null);
     setInterimTranscript('');
+    stopRequestedRef.current = false;
+    finalDeliveredRef.current = false;
 
     // Mock mode for dev/browser testing
     if (MOCK_STT_ENABLED) {
@@ -182,21 +213,16 @@ export function useSpeechRecognition(
     }
 
     try {
-      // Request permission first if needed
+      // request_permission now blocks until the user actually responds to the
+      // OS dialog (resolved natively via the Tauri permission callback), so the
+      // returned value is authoritative — no fixed-delay polling needed.
       const permResult = await invoke<{ granted: boolean }>(
         'plugin:speech-recognizer|request_permission'
       );
 
       if (permResult && !permResult.granted) {
-        // Permission dialog was shown — wait briefly and retry
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        const recheck = await invoke<{ granted: boolean }>(
-          'plugin:speech-recognizer|request_permission'
-        );
-        if (!recheck?.granted) {
-          setError('Microphone permission denied');
-          return;
-        }
+        setError('Microphone permission denied. Enable it in Settings to dictate.');
+        return;
       }
 
       await invoke('plugin:speech-recognizer|start_listening', { language: 'en-US' });
@@ -226,6 +252,9 @@ export function useSpeechRecognition(
     // if the native side never delivers a final result.
     lastInterimRef.current = interimTranscript;
     finalDeliveredRef.current = false;
+    // Mark that the terminal event that follows is a side-effect of our stop,
+    // so the error listener treats a benign no-match/timeout code as "done".
+    stopRequestedRef.current = true;
 
     try {
       await invoke('plugin:speech-recognizer|stop_listening');
@@ -257,6 +286,7 @@ export function useSpeechRecognition(
     interimTranscript,
     startListening,
     stopListening,
+    recheckAvailability,
     error,
   };
 }

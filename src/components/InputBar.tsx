@@ -85,6 +85,7 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
     interimTranscript,
     startListening,
     stopListening,
+    error: sttError,
     setInputHandler,
   } = useSpeechContext();
 
@@ -280,6 +281,12 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
       {maxHint && (
         <div className="effort-max-hint">
           Running at <strong>XHIGH</strong> — true MAX effort applies only to a newly created session.
+        </div>
+      )}
+
+      {sttError && !isListening && (
+        <div className="stt-error-hint" role="status">
+          <span>{sttError}</span>
         </div>
       )}
 
