@@ -40,7 +40,21 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const requestSessionHistory = useSessionStore((s) => s.requestSessionHistory);
   const refreshUsage = useSessionStore((s) => s.refreshUsage);
   const setPanelMode = useUIStore((s) => s.setPanelMode);
+  const retryOptimisticSession = useSessionStore((s) => s.retryOptimisticSession);
+  // Reactive status of the active optimistic session, if any (drives the retry banner).
+  const optimisticStatus = useSessionStore((s) => {
+    const id = s.activeSessionId;
+    if (!id || !id.startsWith('optimistic:')) return null;
+    return s.optimisticSessions.get(id.slice('optimistic:'.length))?.status ?? null;
+  });
   const isTouchDevice = useMediaQuery('(pointer: coarse)');
+
+  const handleRetryOptimistic = useCallback(() => {
+    const id = useSessionStore.getState().activeSessionId;
+    if (id && id.startsWith('optimistic:')) {
+      retryOptimisticSession(id.slice('optimistic:'.length));
+    }
+  }, [retryOptimisticSession]);
 
   const orderedIds = useOrderedSessionIds();
 
@@ -163,6 +177,25 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
         <>
           <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
           <OutputStream sessionId={remoteSession.id} />
+          {optimisticStatus === 'failed' && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '10px 14px',
+              margin: '0 12px 8px',
+              borderRadius: 8,
+              background: 'var(--bg-error, rgba(220, 38, 38, 0.12))',
+              border: '1px solid var(--border-error, rgba(220, 38, 38, 0.4))',
+              fontSize: 13,
+            }}>
+              <span style={{ color: 'var(--text-muted)' }}>Couldn’t start the session.</span>
+              <button className="modal-secondary-btn" style={{ padding: '6px 14px', margin: 0 }} onClick={handleRetryOptimistic}>
+                Retry
+              </button>
+            </div>
+          )}
           <RemotePermissionBar sessionId={remoteSession.id} />
           <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} />
         </>

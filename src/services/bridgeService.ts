@@ -537,6 +537,9 @@ async function publishToMachine(machine: RemoteMachine, msg: BridgeOutboundMessa
   }
 
   const myGen = generation;
+  // Cap on how long we'll wait for any relay to accept before giving up this send,
+  // so a set of relays that never answer can't hang an awaited input forever.
+  const PUBLISH_TIMEOUT_MS = 4000;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -552,24 +555,44 @@ async function publishToMachine(machine: RemoteMachine, msg: BridgeOutboundMessa
         content: ciphertext,
       }, ownSecretKeyBytes);
 
-      // pool.publish returns Promise<string>[] — await each relay individually
+      // pool.publish returns Promise<string>[] — resolve on the FIRST relay to accept
+      // instead of waiting for the slowest. This is on the critical path of session
+      // creation, so the round-trip should track the fastest relay, not the slowest.
       if (!pool || myGen !== generation) { return false; } // pool may have been destroyed
       const results = pool.publish(machine.relays, event);
-      const outcomes = await Promise.allSettled(results);
-      const anySuccess = outcomes.some(o => o.status === 'fulfilled');
+      // Attach catch handlers so the losing relays don't surface as unhandled rejections
+      // once Promise.any has already resolved on the first success.
+      results.forEach((p, i) => p.catch((reason) => {
+        console.warn(`[Bridge] Relay ${machine.relays[i]} rejected publish:`, reason);
+      }));
 
-      for (let i = 0; i < outcomes.length; i++) {
-        if (outcomes[i].status === 'rejected') {
-          console.warn(`[Bridge] Relay ${machine.relays[i]} rejected publish:`, (outcomes[i] as PromiseRejectedResult).reason);
-        }
+      // Promise.any resolves as soon as any relay accepts; it only rejects
+      // (AggregateError) when EVERY relay rejected. Race a timeout so an
+      // unresponsive relay set can't hang an awaited send.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let outcome: 'ack' | 'rejected' | 'timeout';
+      try {
+        outcome = await Promise.race([
+          Promise.any(results).then(() => 'ack' as const, () => 'rejected' as const),
+          new Promise<'timeout'>((resolve) => {
+            timer = setTimeout(() => resolve('timeout'), PUBLISH_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timer) { clearTimeout(timer); }
       }
 
-      if (anySuccess) { return true; }
+      if (outcome === 'ack') { return true; }
+      if (outcome === 'timeout') {
+        // Event may still land via the pool's open connections; just stop waiting.
+        console.warn(`[Bridge] Publish to ${machine.hostname} timed out after ${PUBLISH_TIMEOUT_MS}ms`);
+        return false;
+      }
 
-      // All relays rejected — retry once after 2s
+      // outcome === 'rejected' → every relay rejected. Retry once after a short backoff.
       if (attempt === 0) {
-        console.warn('[Bridge] All relays rejected, retrying in 2s...');
-        await new Promise(r => setTimeout(r, 2000));
+        console.warn('[Bridge] All relays rejected, retrying in 750ms...');
+        await new Promise(r => setTimeout(r, 750));
       }
     } catch (err) {
       console.error(`[Bridge] Failed to publish to ${machine.hostname} (attempt ${attempt + 1}):`, err);

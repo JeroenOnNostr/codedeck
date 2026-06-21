@@ -24,6 +24,9 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const setMode = useSessionStore((s) => s.setMode);
   const setEffort = useSessionStore((s) => s.setEffort);
+  // Which setting (if any) is awaiting a bridge *-confirmed for this session — drives the
+  // "pending" pulse on the mode/effort buttons so a slow/failed round-trip is visible.
+  const pendingSettingKind = useSessionStore((s) => s.remoteSettingPending[sessionId]?.kind ?? null);
   const pendingRevision = useSessionStore((s) => s.pendingRevisionSession === sessionId);
   const clearPendingRevision = useSessionStore((s) => s.setPendingRevision);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -311,15 +314,15 @@ export default function InputBar({ sessionId, mode, effort }: { sessionId: strin
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
-          <button className={`mode-btn active${modeCooldown ? ' mode-cooldown' : ''}`} onPointerDown={e => e.preventDefault()} onClick={cycleMode}>
+          <button className={`mode-btn active${modeCooldown ? ' mode-cooldown' : ''}${pendingSettingKind === 'mode' ? ' setting-pending' : ''}`} onPointerDown={e => e.preventDefault()} onClick={cycleMode} title={pendingSettingKind === 'mode' ? 'Applying…' : undefined}>
             {MODE_LABELS[mode ?? 'default']}
           </button>
           {effort !== undefined && (
             <button
-              className={`effort-btn active${effortCooldown ? ' effort-cooldown' : ''}`}
+              className={`effort-btn active${effortCooldown ? ' effort-cooldown' : ''}${pendingSettingKind === 'effort' ? ' setting-pending' : ''}`}
               onPointerDown={e => e.preventDefault()}
               onClick={cycleEffort}
-              title={effort === 'xhigh' ? 'XHIGH — for true MAX, start a new session' : `Effort: ${EFFORT_LABELS[effort]}`}
+              title={pendingSettingKind === 'effort' ? 'Applying…' : effort === 'xhigh' ? 'XHIGH — for true MAX, start a new session' : `Effort: ${EFFORT_LABELS[effort]}`}
             >
               {EFFORT_LABELS[effort]}
             </button>

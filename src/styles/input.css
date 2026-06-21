@@ -146,6 +146,18 @@
   pointer-events: none;
 }
 
+/* In-flight mode/effort change awaiting the bridge's *-confirmed — gentle pulse so a slow
+   or failed round-trip is visible (the value reverts if no confirm arrives in 8s). */
+.mode-btn.setting-pending,
+.effort-btn.setting-pending {
+  animation: setting-pending-pulse 1s ease-in-out infinite;
+}
+
+@keyframes setting-pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 /* Transient hint shown when a mid-session 'max' effort request is applied as 'xhigh'. */
 .effort-max-hint {
   margin: 0 8px 6px;

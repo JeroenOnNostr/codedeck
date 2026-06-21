@@ -28,6 +28,24 @@ import { persistGet, persistSet } from '../services/persistStore';
 import { notifyIfNeeded } from '../services/notificationService';
 import { DEFAULT_MODEL } from '../constants/models';
 import { useDmStore } from './dmStore';
+import { useUIStore } from './uiStore';
+
+/** A locally-created session shown instantly on "Start Session" — before the bridge
+ *  round-trips a real session id back. Reconciled into the real session on session-ready. */
+interface OptimisticSession {
+  localId: string;
+  machinePubkeyHex: string;
+  createdAt: string;
+  model?: string;
+  effortLevel?: EffortLevel;
+  testSession?: boolean;
+  /** Set once the bridge's session-pending for this create is associated with us. */
+  pendingId?: string;
+  /** First message(s) typed before the real session existed — flushed to the wire on adoption. */
+  bufferedMessages: Array<{ text: string; image?: { base64: string; filename: string; mimeType: string } }>;
+  timeoutId: ReturnType<typeof setTimeout>;
+  status: 'starting' | 'failed';
+}
 
 interface SessionStore {
   sessions: Session[];
@@ -43,12 +61,23 @@ interface SessionStore {
   remoteSessionModes: Record<string, AgentMode>; // keyed by sessionId
   remoteSessionEffort: Record<string, EffortLevel>; // keyed by sessionId
   remoteSessionModel: Record<string, string>; // keyed by sessionId — Claude model ID
+  /** Per-session in-flight mode/effort/model change awaiting a *-confirmed from the bridge.
+   *  Keyed by sessionId. `prev` is the last confirmed value, restored if no confirm arrives. */
+  remoteSettingPending: Record<string, { kind: 'mode' | 'effort' | 'model'; prev: AgentMode | EffortLevel | string }>;
   remoteSessionUsage: Record<string, UsageData>; // keyed by sessionId — subscription usage snapshot
+  /** Latest-turn context-window occupancy in tokens, keyed by sessionId. This is a SNAPSHOT
+   *  (input + cache_read + cache_creation of the most recent turn), NOT a cumulative sum — it
+   *  falls after /compact. Divided by the model's max context to show a context-usage %. */
+  remoteSessionContext: Record<string, number>;
   machineProtocolVersion: Record<string, number>; // keyed by machine pubkeyHex — bridge protocol version (>=1 supports model selection)
   historyLoading: Record<string, boolean>;
   refreshing: boolean;
   /** Pending sessions awaiting JSONL file creation. Map<pendingId, metadata>. */
   pendingSessions: Map<string, { pendingId: string; machine: string; createdAt: string; timeoutId: ReturnType<typeof setTimeout> }>;
+  /** Locally-created sessions shown instantly on tap, awaiting bridge reconciliation. Map<localId, …>. */
+  optimisticSessions: Map<string, OptimisticSession>;
+  /** FIFO of outstanding optimistic localIds per machine pubkeyHex — drives ready/pending adoption. */
+  optimisticQueueByMachine: Map<string, string[]>;
   /** Session IDs dismissed this app session — prevents reappearance from stale session-list events.
    *  Map<sessionId, dismissedAt timestamp> — entries older than 1 hour are pruned. */
   dismissedSessionIds: Map<string, number>;
@@ -76,6 +105,12 @@ interface SessionStore {
   setMode: (sessionId: string, mode: AgentMode) => Promise<void>;
   setEffort: (sessionId: string, level: EffortLevel) => Promise<void>;
   setModel: (sessionId: string, model: string) => Promise<void>;
+  /** Arm/re-arm the no-confirm revert timer for an in-flight setting change. */
+  armSettingRevert: (sessionId: string) => void;
+  /** Restore the last-confirmed mode/effort/model after a failed/unconfirmed change. */
+  revertSetting: (sessionId: string) => void;
+  /** Clear the in-flight marker for a session (called when a *-confirmed arrives). */
+  clearSettingPending: (sessionId: string) => void;
   refreshUsage: (sessionId: string) => Promise<void>;
   setRemoteSessionModeLocal: (sessionId: string, mode: AgentMode) => void;
   updateConfig: (config: AppConfig) => Promise<void>;
@@ -94,6 +129,10 @@ interface SessionStore {
   requestSessionHistory: (sessionId: string) => Promise<void>;
   requestRefreshSessions: () => void;
   createRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string) => Promise<void>;
+  /** Optimistic create: opens a usable session view instantly, then fires the real create. */
+  startOptimisticRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string) => void;
+  /** Re-fire a create for an optimistic session that timed out or failed. */
+  retryOptimisticSession: (localId: string) => void;
   deleteRemoteSession: (sessionId: string) => void;
   undoDeleteSession: () => void;
   respondRemotePermission: (sessionId: string, requestId: string, allow: boolean, modifier?: 'always' | 'never') => Promise<void>;
@@ -182,6 +221,15 @@ let pendingDeleteSnapshot: {
 
 const UNDO_DELAY_MS = 4_000;
 
+/** In-flight mode/effort/model changes: if the bridge doesn't confirm within this window we
+ *  assume the round-trip failed and revert the optimistic value to its last confirmed state. */
+const SETTING_CONFIRM_TIMEOUT_MS = 8_000;
+const settingRevertTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function clearSettingRevertTimer(sessionId: string): void {
+  const t = settingRevertTimers.get(sessionId);
+  if (t) { clearTimeout(t); settingRevertTimers.delete(sessionId); }
+}
+
 /** Debounced persist for remote session metadata. Strips volatile fields (hasTerminal). */
 let persistSessionsTimer: ReturnType<typeof setTimeout> | null = null;
 let persistSessionsGetter: (() => { remoteSessions: Record<string, RemoteSessionInfo[]> }) | null = null;
@@ -215,6 +263,149 @@ function clearHistoryLoading(sessionId: string, set: (fn: (state: SessionStore) 
     const { [sessionId]: _, ...rest } = state.historyLoading;
     return { historyLoading: rest };
   });
+}
+
+// --- Optimistic session start helpers ---
+
+/** If the bridge never acks an optimistic create, surface failure rather than hang on "Starting…". */
+const OPTIMISTIC_NO_ACK_TIMEOUT_MS = 20_000;
+
+type SetFn = (fn: (state: SessionStore) => Partial<SessionStore>) => void;
+
+/** Local-only placeholder rows the bridge's session-list never contains: bridge-driven
+ *  `pending:` rows and locally-created `optimistic:` rows. A session-list snapshot must
+ *  never drop these before they're reconciled. */
+export function isLocalPlaceholder(id: string): boolean {
+  return id.startsWith('pending:') || id.startsWith('optimistic:');
+}
+
+/** Move a value from one key to another in a record (no-op if `from` is absent). */
+function renameKey<T>(rec: Record<string, T>, from: string, to: string): Record<string, T> {
+  if (!(from in rec)) return rec;
+  const { [from]: val, ...rest } = rec;
+  return { ...rest, [to]: (rest as Record<string, T>)[to] ?? val };
+}
+
+/** Rename a Set member (no-op if `from` is absent). */
+function renameSetMember(s: Set<string>, from: string, to: string): Set<string> {
+  if (!s.has(from)) return s;
+  const next = new Set(s);
+  next.delete(from);
+  next.add(to);
+  return next;
+}
+
+/** Arm (or re-arm) the no-ack timeout for an optimistic session. */
+function armOptimisticTimeout(localId: string, set: SetFn, get: () => SessionStore): ReturnType<typeof setTimeout> {
+  return setTimeout(() => {
+    const opt = get().optimisticSessions.get(localId);
+    if (!opt || opt.status !== 'starting') return;
+    get().addOutput(`optimistic:${localId}`, {
+      entry_type: 'error',
+      content: 'The bridge didn’t respond. The machine may be offline — tap Retry to try again.',
+      timestamp: new Date().toISOString(),
+    });
+    set((state) => {
+      const next = new Map(state.optimisticSessions);
+      const entry = next.get(localId);
+      if (!entry) return {};
+      next.set(localId, { ...entry, status: 'failed' });
+      // Drop from the adoption queue so a stray later pending/ready can't adopt a failed one.
+      const queue = new Map(state.optimisticQueueByMachine);
+      queue.set(entry.machinePubkeyHex, (queue.get(entry.machinePubkeyHex) || []).filter(id => id !== localId));
+      return { optimisticSessions: next, optimisticQueueByMachine: queue };
+    });
+  }, OPTIMISTIC_NO_ACK_TIMEOUT_MS);
+}
+
+/** Reconcile a locally-created optimistic session into the real bridge session.
+ *  Rewrites the row in place (no flicker), migrates per-session maps, moves the active
+ *  selection, clears optimistic bookkeeping, and flushes any buffered first message. */
+export function adoptOptimisticSession(localId: string, session: RemoteSessionInfo, set: SetFn, get: () => SessionStore): void {
+  const rowId = `optimistic:${localId}`;
+  const opt = get().optimisticSessions.get(localId);
+  if (opt) clearTimeout(opt.timeoutId);
+
+  set((state) => {
+    const newRemoteSessions = { ...state.remoteSessions };
+    let machineKey: string | undefined;
+    for (const [pubkeyHex, sessions] of Object.entries(newRemoteSessions)) {
+      const idx = sessions.findIndex(s => s.id === rowId);
+      if (idx >= 0) {
+        machineKey = pubkeyHex;
+        const updated = [...sessions];
+        // Rewrite in place at the same index — preserve the user's first-message title
+        // over the bridge's null (mirrors the session-list merge at ~line 919).
+        updated[idx] = { ...sessions[idx], ...session, title: session.title ?? sessions[idx].title };
+        // Dedup: drop any other row that already carries the real id.
+        newRemoteSessions[pubkeyHex] = updated.filter((s, i) => i === idx || s.id !== session.id);
+        break;
+      }
+    }
+    // Optimistic row vanished (shouldn't happen) — insert the real session under its machine.
+    if (!machineKey && opt) {
+      machineKey = opt.machinePubkeyHex;
+      const existing = newRemoteSessions[machineKey] || [];
+      if (!existing.some(s => s.id === session.id)) {
+        newRemoteSessions[machineKey] = [...existing, session];
+      }
+    }
+
+    // Migrate per-session keyed state from the optimistic row id to the real id.
+    const remoteSessionEffort = renameKey(state.remoteSessionEffort, rowId, session.id);
+    const remoteSessionModel = renameKey(state.remoteSessionModel, rowId, session.id);
+    if (session.effortLevel && !remoteSessionEffort[session.id]) remoteSessionEffort[session.id] = session.effortLevel;
+    if (session.model && !remoteSessionModel[session.id]) remoteSessionModel[session.id] = session.model;
+
+    const readyTs = new Map(state.sessionReadyTimestamps);
+    readyTs.set(session.id, Date.now());
+
+    const optimisticSessions = new Map(state.optimisticSessions);
+    optimisticSessions.delete(localId);
+    const optimisticQueueByMachine = new Map(state.optimisticQueueByMachine);
+    if (machineKey) {
+      optimisticQueueByMachine.set(machineKey, (optimisticQueueByMachine.get(machineKey) || []).filter(id => id !== localId));
+    } else {
+      for (const [k, list] of optimisticQueueByMachine) {
+        if (list.includes(localId)) optimisticQueueByMachine.set(k, list.filter(id => id !== localId));
+      }
+    }
+
+    return {
+      remoteSessions: newRemoteSessions,
+      outputs: renameKey(state.outputs, rowId, session.id),
+      remoteSessionModes: renameKey(state.remoteSessionModes, rowId, session.id),
+      remoteSessionContext: renameKey(state.remoteSessionContext, rowId, session.id),
+      remoteSessionEffort,
+      remoteSessionModel,
+      unreadSessions: renameSetMember(state.unreadSessions, rowId, session.id),
+      sessionReadyTimestamps: readyTs,
+      optimisticSessions,
+      optimisticQueueByMachine,
+      activeSessionId: state.activeSessionId === rowId ? session.id : state.activeSessionId,
+    };
+  });
+  debouncedPersistRemoteSessions(get);
+
+  // Flush any message the user typed before the real session existed.
+  if (opt && opt.bufferedMessages.length > 0) {
+    const machine = get().machines.find(m => m.pubkeyHex === opt.machinePubkeyHex);
+    if (machine) {
+      const blossomServer = useDmStore.getState().nostrConfig.blossomServer;
+      for (const buffered of opt.bufferedMessages) {
+        const send = buffered.image
+          ? sendRemoteImage(machine, session.id, buffered.text, buffered.image.base64, buffered.image.filename, buffered.image.mimeType, blossomServer)
+          : sendRemoteInput(machine, session.id, buffered.text);
+        Promise.resolve(send).catch((e) => {
+          get().addOutput(session.id, {
+            entry_type: 'error',
+            content: `Failed to send queued message: ${e}`,
+            timestamp: new Date().toISOString(),
+          });
+        });
+      }
+    }
+  }
 }
 
 /** Binary search for insertion index by bridgeSeq. */
@@ -337,11 +528,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSessionModes: {},
   remoteSessionEffort: {},
   remoteSessionModel: {},
+  remoteSettingPending: {},
   remoteSessionUsage: {},
+  remoteSessionContext: {},
   machineProtocolVersion: {},
   historyLoading: {},
   refreshing: false,
   pendingSessions: new Map(),
+  optimisticSessions: new Map(),
+  optimisticQueueByMachine: new Map(),
   dismissedSessionIds: new Map(),
   sessionReadyTimestamps: new Map(),
   undoToast: null,
@@ -415,8 +610,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     // Accumulate token usage directly in the store (don't mark unread for metrics)
     if (entry.entry_type === 'token_usage') {
-      // Prefer structured metadata.usage (reliable) over regex on content string (fragile)
-      const usage = entry.metadata?.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+      // Prefer structured metadata.usage (reliable) over regex on content string (fragile).
+      // The cache fields are the standard Anthropic usage shape forwarded verbatim by the bridge.
+      const usage = entry.metadata?.usage as {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number | null;
+        cache_creation_input_tokens?: number | null;
+      } | undefined;
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
 
@@ -434,6 +635,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
       if (inputTokens !== undefined && outputTokens !== undefined) {
         const prev = state.tokenUsage[sessionId] || { input_tokens: 0, output_tokens: 0, total_cost_usd: 0 };
+        // Context-window occupancy is a per-turn SNAPSHOT, not a cumulative sum: the total input
+        // for this turn = input + cache_read + cache_creation (per the Anthropic usage spec). The
+        // latest turn wins; it falls naturally after /compact. Only available from structured
+        // metadata (the content-string fallback has no cache breakdown), so leave the prior
+        // snapshot untouched when we couldn't read it.
+        const cacheRead = typeof usage?.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+        const cacheCreate = typeof usage?.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+        const contextTokens = usage && typeof usage.input_tokens === 'number'
+          ? usage.input_tokens + cacheRead + cacheCreate
+          : undefined;
         return {
           outputs: { ...state.outputs, [sessionId]: existing },
           tokenUsage: {
@@ -444,6 +655,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               total_cost_usd: prev.total_cost_usd,
             },
           },
+          ...(contextTokens !== undefined
+            ? { remoteSessionContext: { ...state.remoteSessionContext, [sessionId]: contextTokens } }
+            : {}),
         };
       }
       return state;
@@ -552,6 +766,43 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   sendMessage: async (sessionId, text, image) => {
+    // Optimistic session: the bridge doesn't know this id yet. Echo locally and buffer
+    // the message — it's flushed to the wire when session-ready adopts the row.
+    if (sessionId.startsWith('optimistic:')) {
+      const localId = sessionId.slice('optimistic:'.length);
+      const opt = get().optimisticSessions.get(localId);
+      if (opt) {
+        set((state) => clearUnread(state, sessionId));
+        get().addOutput(sessionId, {
+          entry_type: 'user_message',
+          content: text || (image ? `[Image: ${image.filename}]` : ''),
+          timestamp: new Date().toISOString(),
+          ...(image ? { metadata: { imageFilename: image.filename } } : {}),
+        });
+        if (text) {
+          set((state) => {
+            const sessions = state.remoteSessions[opt.machinePubkeyHex] || [];
+            const idx = sessions.findIndex(s => s.id === sessionId);
+            if (idx !== -1 && !sessions[idx].title) {
+              const title = text.replace(/\n/g, ' ').trim();
+              const updated = [...sessions];
+              updated[idx] = { ...updated[idx], title: title.length > 80 ? title.slice(0, 77) + '...' : title };
+              return { remoteSessions: { ...state.remoteSessions, [opt.machinePubkeyHex]: updated } };
+            }
+            return {};
+          });
+        }
+        set((state) => {
+          const next = new Map(state.optimisticSessions);
+          const entry = next.get(localId);
+          if (entry) next.set(localId, { ...entry, bufferedMessages: [...entry.bufferedMessages, { text, image }] });
+          return { optimisticSessions: next };
+        });
+        return;
+      }
+      // No optimistic entry (already adopted/cleaned) — fall through to the normal path.
+    }
+
     set((state) => clearUnread(state, sessionId));
     get().addOutput(sessionId, {
       entry_type: 'user_message',
@@ -698,14 +949,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Check if this is a remote session
     const machine = get().getMachineForSession(sessionId);
     if (machine) {
-      // Update remote session mode optimistically (phone-side tracking)
+      // Optimistic update + mark in-flight, remembering the prior value to revert to.
+      const prev = get().remoteSessionModes[sessionId] ?? 'plan';
       set((state) => ({
         remoteSessionModes: { ...state.remoteSessionModes, [sessionId]: mode },
+        remoteSettingPending: { ...state.remoteSettingPending, [sessionId]: { kind: 'mode', prev } },
       }));
+      get().armSettingRevert(sessionId);
       try {
         await sendRemoteModeChange(machine, sessionId, mode);
       } catch (e) {
         console.error('[SessionStore] Failed to send remote mode change:', e);
+        get().revertSetting(sessionId); // send itself failed — restore immediately
       }
       return;
     }
@@ -720,14 +975,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   setEffort: async (sessionId, level) => {
     const machine = get().getMachineForSession(sessionId);
     if (machine) {
-      // Update remote session effort optimistically
+      const prev = get().remoteSessionEffort[sessionId] ?? 'auto';
       set((state) => ({
         remoteSessionEffort: { ...state.remoteSessionEffort, [sessionId]: level },
+        remoteSettingPending: { ...state.remoteSettingPending, [sessionId]: { kind: 'effort', prev } },
       }));
+      get().armSettingRevert(sessionId);
       try {
         await sendRemoteEffortChange(machine, sessionId, level);
       } catch (e) {
         console.error('[SessionStore] Failed to send remote effort change:', e);
+        get().revertSetting(sessionId);
       }
     }
   },
@@ -735,16 +993,57 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   setModel: async (sessionId, model) => {
     const machine = get().getMachineForSession(sessionId);
     if (machine) {
-      // Update remote session model optimistically
+      const prev = get().remoteSessionModel[sessionId] ?? '';
       set((state) => ({
         remoteSessionModel: { ...state.remoteSessionModel, [sessionId]: model },
+        remoteSettingPending: { ...state.remoteSettingPending, [sessionId]: { kind: 'model', prev } },
       }));
+      get().armSettingRevert(sessionId);
       try {
         await sendRemoteModelChange(machine, sessionId, model);
       } catch (e) {
         console.error('[SessionStore] Failed to send remote model change:', e);
+        get().revertSetting(sessionId);
       }
     }
+  },
+
+  /** Arm (or re-arm) the revert timer for an in-flight setting change on this session. */
+  armSettingRevert: (sessionId) => {
+    clearSettingRevertTimer(sessionId);
+    settingRevertTimers.set(sessionId, setTimeout(() => {
+      settingRevertTimers.delete(sessionId);
+      get().revertSetting(sessionId);
+    }, SETTING_CONFIRM_TIMEOUT_MS));
+  },
+
+  /** Restore the last-confirmed value for a session whose change never got confirmed. */
+  revertSetting: (sessionId) => {
+    clearSettingRevertTimer(sessionId);
+    const pending = get().remoteSettingPending[sessionId];
+    if (!pending) return;
+    set((state) => {
+      const { [sessionId]: _drop, ...restPending } = state.remoteSettingPending;
+      const next: Partial<SessionStore> = { remoteSettingPending: restPending };
+      if (pending.kind === 'mode') {
+        next.remoteSessionModes = { ...state.remoteSessionModes, [sessionId]: pending.prev as AgentMode };
+      } else if (pending.kind === 'effort') {
+        next.remoteSessionEffort = { ...state.remoteSessionEffort, [sessionId]: pending.prev as EffortLevel };
+      } else {
+        next.remoteSessionModel = { ...state.remoteSessionModel, [sessionId]: pending.prev as string };
+      }
+      return next as SessionStore;
+    });
+  },
+
+  /** Clear the in-flight marker once the bridge confirms a change (called by *-confirmed handlers). */
+  clearSettingPending: (sessionId) => {
+    clearSettingRevertTimer(sessionId);
+    if (!get().remoteSettingPending[sessionId]) return;
+    set((state) => {
+      const { [sessionId]: _drop, ...restPending } = state.remoteSettingPending;
+      return { remoteSettingPending: restPending };
+    });
   },
 
   refreshUsage: async (sessionId) => {
@@ -829,11 +1128,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const cleanedModes = { ...state.remoteSessionModes };
       const cleanedOutputs = { ...state.outputs };
       const cleanedUsage = { ...state.tokenUsage };
+      const cleanedContext = { ...state.remoteSessionContext };
       const cleanedLoading = { ...state.historyLoading };
       for (const id of removedIds) {
         delete cleanedModes[id];
         delete cleanedOutputs[id];
         delete cleanedUsage[id];
+        delete cleanedContext[id];
         delete cleanedLoading[id];
         autoHistoryRequested.delete(id);
         seenBridgeSeqs.delete(id);
@@ -844,6 +1145,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSessionModes: cleanedModes,
         outputs: cleanedOutputs,
         tokenUsage: cleanedUsage,
+        remoteSessionContext: cleanedContext,
         historyLoading: cleanedLoading,
       };
     });
@@ -934,13 +1236,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               merged.push(...pendingPlaceholders);
             }
 
+            // Preserve optimistic placeholders (locally created, awaiting bridge ack) — the
+            // bridge's session-list never contains them, so they'd otherwise be dropped before
+            // reconciliation, yanking the session view out from under the user mid-type.
+            const optimisticPlaceholders = existing.filter(
+              s => s.id.startsWith('optimistic:') && !merged.some(m => m.id === s.id),
+            );
+            if (optimisticPlaceholders.length > 0) {
+              merged.push(...optimisticPlaceholders);
+            }
+
             // Preserve recently-ready sessions that aren't in the incoming list yet.
             // This covers the window between session-ready and the bridge indexing the JSONL.
             const READY_GRACE_MS = 90_000;
             const now = Date.now();
             const mergedIds = new Set(merged.map(s => s.id));
             for (const s of existing) {
-              if (s.id.startsWith('pending:')) continue;
+              if (isLocalPlaceholder(s.id)) continue;
               if (mergedIds.has(s.id)) continue;
               const readyAt = state.sessionReadyTimestamps.get(s.id);
               if (readyAt && (now - readyAt) < READY_GRACE_MS) {
@@ -1039,7 +1351,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           const currentSessions = get().remoteSessions[machine.pubkeyHex] || [];
           const sessionsNeedingHistory = currentSessions
             .filter((s: RemoteSessionInfo) =>
-              !s.id.startsWith('pending:')
+              !isLocalPlaceholder(s.id)
               && (!currentOutputs[s.id] || currentOutputs[s.id].length === 0)
               && !currentLoading[s.id]
               && !autoHistoryRequested.has(s.id))
@@ -1198,6 +1510,27 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const machine = machines.find(m => m.hostname === machineName) || machines[0];
         if (!machine) return;
 
+        // Optimistic adoption: if we have an outstanding locally-created session for this
+        // machine, this pending belongs to it. Record the association and skip the bridge
+        // placeholder — the optimistic row is already on screen serving the same purpose.
+        {
+          const queue = get().optimisticQueueByMachine.get(machine.pubkeyHex);
+          const localId = queue?.find(id => {
+            const e = get().optimisticSessions.get(id);
+            return e?.status === 'starting' && !e.pendingId;
+          });
+          if (localId) {
+            set((state) => {
+              const next = new Map(state.optimisticSessions);
+              const entry = next.get(localId);
+              if (!entry) return {};
+              next.set(localId, { ...entry, pendingId });
+              return { optimisticSessions: next };
+            });
+            return;
+          }
+        }
+
         // 2-minute client-side cleanup timer
         const timeoutId = setTimeout(() => {
           console.warn(`[SessionStore] Pending session ${pendingId} expired (2min cleanup)`);
@@ -1245,6 +1578,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       },
       // onSessionReady — replace placeholder with real session, set active, switch panel
       (pendingId, session) => {
+        // Optimistic adoption: match by recorded pendingId, else (ready-before-pending)
+        // the sole outstanding optimistic create.
+        {
+          const optMap = get().optimisticSessions;
+          let adoptLocalId: string | undefined;
+          for (const [lid, entry] of optMap) {
+            if (entry.pendingId === pendingId) { adoptLocalId = lid; break; }
+          }
+          if (!adoptLocalId) {
+            const starting = [...optMap.values()].filter(e => e.status === 'starting' && !e.pendingId);
+            if (starting.length === 1) adoptLocalId = starting[0].localId;
+          }
+          if (adoptLocalId) {
+            adoptOptimisticSession(adoptLocalId, session, set, get);
+            return;
+          }
+        }
+
         const pending = new Map(get().pendingSessions); // copy before mutating
         const entry = pending.get(pendingId);
         if (entry) {
@@ -1307,6 +1658,39 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // onSessionFailed — remove placeholder
       (pendingId, reason) => {
         console.warn(`[SessionStore] Session failed: ${pendingId} (${reason})`);
+
+        // Optimistic session failure: keep the row visible, surface the error + retry.
+        {
+          const optMap = get().optimisticSessions;
+          let failLocalId: string | undefined;
+          for (const [lid, entry] of optMap) {
+            if (entry.pendingId === pendingId) { failLocalId = lid; break; }
+          }
+          if (!failLocalId) {
+            const starting = [...optMap.values()].filter(e => e.status === 'starting' && !e.pendingId);
+            if (starting.length === 1) failLocalId = starting[0].localId;
+          }
+          if (failLocalId) {
+            const opt = optMap.get(failLocalId);
+            if (opt) clearTimeout(opt.timeoutId);
+            get().addOutput(`optimistic:${failLocalId}`, {
+              entry_type: 'error',
+              content: `Session failed to start (${reason}). Tap Retry to try again.`,
+              timestamp: new Date().toISOString(),
+            });
+            set((state) => {
+              const next = new Map(state.optimisticSessions);
+              const entry = next.get(failLocalId);
+              if (!entry) return {};
+              next.set(failLocalId, { ...entry, status: 'failed' });
+              const queue = new Map(state.optimisticQueueByMachine);
+              queue.set(entry.machinePubkeyHex, (queue.get(entry.machinePubkeyHex) || []).filter(id => id !== failLocalId));
+              return { optimisticSessions: next, optimisticQueueByMachine: queue };
+            });
+            return;
+          }
+        }
+
         const pending = new Map(get().pendingSessions); // copy before mutating
         const entry = pending.get(pendingId);
         if (entry) {
@@ -1407,18 +1791,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         set((state) => ({
           remoteSessionModes: { ...state.remoteSessionModes, [sessionId]: mode },
         }));
+        get().clearSettingPending(sessionId);
       },
       // onEffortConfirmed — fast feedback from bridge after effort change
       (sessionId: string, level: EffortLevel) => {
         set((state) => ({
           remoteSessionEffort: { ...state.remoteSessionEffort, [sessionId]: level },
         }));
+        get().clearSettingPending(sessionId);
       },
       // onModelConfirmed — fast feedback from bridge after model change
       (sessionId: string, model: string) => {
         set((state) => ({
           remoteSessionModel: { ...state.remoteSessionModel, [sessionId]: model },
         }));
+        get().clearSettingPending(sessionId);
       },
       // onCredentialsAck — bridge confirms credential storage, update machine immediately
       (machineName: string, success: boolean, hasAnthropicKey: boolean, hasGithubPat: boolean, keyValid?: boolean, error?: string) => {
@@ -1565,6 +1952,90 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
+  startOptimisticRemoteSession: (machine, testSession, model) => {
+    const localId = crypto.randomUUID();
+    const rowId = `optimistic:${localId}`;
+    const { default_effort: defaultEffort, model: configModel } = get().config;
+    const effortLevel: EffortLevel | undefined = defaultEffort !== 'auto' ? defaultEffort : undefined;
+    const resolvedModel = model ?? (configModel || undefined);
+    const now = new Date().toISOString();
+
+    const placeholder: RemoteSessionInfo = {
+      id: rowId,
+      slug: 'Starting…',
+      cwd: '',
+      lastActivity: now,
+      lineCount: 0,
+      title: null,
+      project: 'Starting session…',
+      permissionMode: 'plan',
+      effortLevel,
+      model: resolvedModel,
+      state: 'running',
+    };
+
+    const timeoutId = armOptimisticTimeout(localId, set, get);
+
+    set((state) => {
+      const existing = state.remoteSessions[machine.pubkeyHex] || [];
+      const queue = new Map(state.optimisticQueueByMachine);
+      queue.set(machine.pubkeyHex, [...(queue.get(machine.pubkeyHex) || []), localId]);
+      const optimistic = new Map(state.optimisticSessions);
+      optimistic.set(localId, {
+        localId,
+        machinePubkeyHex: machine.pubkeyHex,
+        createdAt: now,
+        model: resolvedModel,
+        effortLevel,
+        testSession: !!testSession,
+        bufferedMessages: [],
+        timeoutId,
+        status: 'starting',
+      });
+      return {
+        remoteSessions: { ...state.remoteSessions, [machine.pubkeyHex]: [...existing, placeholder] },
+        activeSessionId: rowId,
+        optimisticSessions: optimistic,
+        optimisticQueueByMachine: queue,
+        remoteSessionModes: { ...state.remoteSessionModes, [rowId]: 'plan' as AgentMode },
+        // Seed model/effort so the InputBar pills are correct from the first frame.
+        ...(resolvedModel ? { remoteSessionModel: { ...state.remoteSessionModel, [rowId]: resolvedModel } } : {}),
+        ...(effortLevel ? { remoteSessionEffort: { ...state.remoteSessionEffort, [rowId]: effortLevel } } : {}),
+      };
+    });
+
+    // Render the session view (default panel is already 'session', but force it in case
+    // the user was in DMs/settings when they tapped Start Session).
+    useUIStore.getState().setPanelMode('session');
+
+    // Subtle progress line so the OutputStream isn't blank while the bridge spins up.
+    get().addOutput(rowId, { entry_type: 'system', content: 'Starting session…', timestamp: now });
+
+    // Fire the real create over the wire — don't block the UI on it.
+    void get().createRemoteSession(machine, testSession, resolvedModel);
+  },
+
+  retryOptimisticSession: (localId) => {
+    const opt = get().optimisticSessions.get(localId);
+    if (!opt) return;
+    const machine = get().machines.find(m => m.pubkeyHex === opt.machinePubkeyHex);
+    if (!machine) return;
+    clearTimeout(opt.timeoutId);
+    const timeoutId = armOptimisticTimeout(localId, set, get);
+    set((state) => {
+      const next = new Map(state.optimisticSessions);
+      const entry = next.get(localId);
+      if (!entry) return {};
+      next.set(localId, { ...entry, status: 'starting', pendingId: undefined, timeoutId });
+      const queue = new Map(state.optimisticQueueByMachine);
+      const list = queue.get(machine.pubkeyHex) || [];
+      if (!list.includes(localId)) queue.set(machine.pubkeyHex, [...list, localId]);
+      return { optimisticSessions: next, optimisticQueueByMachine: queue };
+    });
+    get().addOutput(`optimistic:${localId}`, { entry_type: 'system', content: 'Retrying…', timestamp: new Date().toISOString() });
+    void get().createRemoteSession(machine, opt.testSession, opt.model);
+  },
+
   deleteRemoteSession: (sessionId) => {
     // Cancel any previous pending delete (auto-commits it immediately)
     if (pendingDeleteTimer) {
@@ -1617,7 +2088,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const { [sessionId]: _t, ...restUsage } = state.tokenUsage;
       const { [sessionId]: _m, ...restModes } = state.remoteSessionModes;
       const { [sessionId]: _e, ...restEffort } = state.remoteSessionEffort;
+      const { [sessionId]: _mo, ...restModel } = state.remoteSessionModel;
+      const { [sessionId]: _p, ...restPending } = state.remoteSettingPending;
       const { [sessionId]: _su, ...restSessionUsage } = state.remoteSessionUsage;
+      const { [sessionId]: _ctx, ...restContext } = state.remoteSessionContext;
       const { [sessionId]: _h, ...restLoading } = state.historyLoading;
 
       // Clean up grace-period tracking for deleted session
@@ -1630,7 +2104,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         tokenUsage: restUsage,
         remoteSessionModes: restModes,
         remoteSessionEffort: restEffort,
+        remoteSessionModel: restModel,
+        remoteSettingPending: restPending,
         remoteSessionUsage: restSessionUsage,
+        remoteSessionContext: restContext,
         historyLoading: restLoading,
         dismissedSessionIds: dismissed,
         sessionReadyTimestamps: readyTs,
@@ -1641,6 +2118,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     seenBridgeSeqs.delete(sessionId);
     autoHistoryRequested.delete(sessionId);
+    clearSettingRevertTimer(sessionId);
     debouncedPersistRemoteSessions(get);
 
     // 4. Defer bridge close-session by UNDO_DELAY_MS

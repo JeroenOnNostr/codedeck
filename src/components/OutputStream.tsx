@@ -443,16 +443,20 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const markResponded = useSessionStore((s) => s.markCardResponded);
-  const isCardResponded = useSessionStore((s) => s.isCardResponded);
   const clearPendingQuestion = useSessionStore((s) => s.clearPendingQuestion);
 
   // Per-question response tracking uses composite card IDs: "toolUseId:q0", "toolUseId:q1", etc.
   const { toolUseId, questions } = item;
 
+  // Subscribe to this session's responded SET (not the isCardResponded function) so an optimistic
+  // markCardResponded re-renders this row immediately — markCardResponded swaps in a new Set ref per
+  // answer, so the tab advances locally without waiting for a bridge round-trip.
+  const respondedSet = useSessionStore((s) => s.respondedCards.get(sessionId));
+
   // Determine which questions are already answered (from store, survives re-renders)
   const answeredSet = new Set<number>();
   for (let i = 0; i < questions.length; i++) {
-    if (isCardResponded(sessionId, `${toolUseId}:q${i}`)) {
+    if (respondedSet?.has(`${toolUseId}:q${i}`)) {
       answeredSet.add(i);
     }
   }
