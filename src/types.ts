@@ -143,6 +143,11 @@ export interface RemoteSessionInfo {
    *  has arrived; reflects the actual 1M-beta window when active. Falls back to model-id guessing
    *  when absent (older bridge or before first result). */
   contextWindow?: number;
+  /** Authoritative context-usage % (0–100) the bridge read from the Agent SDK's
+   *  `query.getContextUsage()` — the exact meter the Claude Code terminal shows. Present from
+   *  protocol v5+ bridges (once a result has arrived). Preferred for display; falls back to the
+   *  tokens/contextWindow computation when absent (older bridge or before first result). */
+  contextPercentage?: number;
   committed?: boolean;
   state?: 'idle' | 'running' | 'waiting_permission' | 'waiting_question';
 }

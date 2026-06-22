@@ -73,6 +73,9 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   const liveModel = useSessionStore((s) => sessionId ? s.remoteSessionModel[sessionId] : undefined);
   // Real context window the bridge advertised (protocol v4+) — the honest %-badge denominator.
   const liveContextWindow = useSessionStore((s) => sessionId ? s.remoteSessionContextWindow[sessionId] : undefined);
+  // Authoritative context-usage % the bridge read straight from the SDK (protocol v5+) — the same
+  // meter the Claude Code terminal shows. Preferred over computing tokens/window ourselves.
+  const liveContextPercentage = useSessionStore((s) => sessionId ? s.remoteSessionContextPercentage[sessionId] : undefined);
   const configModel = useSessionStore((s) => s.config.model);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
   const setVoiceEnabled = useVoiceModeStore((s) => s.setEnabled);
@@ -167,7 +170,13 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
             <span className="header-model-badge">
               {modelLabel(liveModel ?? remoteSession.model ?? configModel)}
               {(() => {
-                const ctx = contextPct(contextTokens, liveModel ?? remoteSession.model ?? configModel, liveContextWindow ?? remoteSession.contextWindow);
+                // Prefer the SDK's authoritative % (protocol v5+) — matches the Claude Code terminal
+                // and avoids the tokens/window reconstruction that jumps. Fall back to the local
+                // computation for older (pre-v5) bridges.
+                const advertised = liveContextPercentage ?? remoteSession.contextPercentage;
+                const ctx = typeof advertised === 'number'
+                  ? advertised
+                  : contextPct(contextTokens, liveModel ?? remoteSession.model ?? configModel, liveContextWindow ?? remoteSession.contextWindow);
                 return ctx !== null ? <span className="header-context-pct"> · {ctx}%</span> : null;
               })()}
             </span>

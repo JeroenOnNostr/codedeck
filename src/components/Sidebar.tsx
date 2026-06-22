@@ -14,10 +14,13 @@ import '../styles/dm.css';
 const PULL_THRESHOLD = 60;
 const MAX_PULL = 100;
 
-function StatusDot({ state }: { state: Session['state'] }) {
-  if (state === 'idle' || state === 'completed' || state === 'error') return null;
+function StatusDot({ state }: { state: Session['state'] | RemoteSessionInfo['state'] }) {
+  if (!state || state === 'idle' || state === 'completed' || state === 'error') return null;
 
-  const cls = state === 'waiting_permission' ? 'status-dot waiting' : 'status-dot running';
+  // Both attention states (plan-approval / permission, and AskUserQuestion) get the
+  // amber "waiting" dot so they stand out in the list; everything else is "running".
+  const waiting = state === 'waiting_permission' || state === 'waiting_question';
+  const cls = waiting ? 'status-dot waiting' : 'status-dot running';
   return <div className={cls} />;
 }
 
@@ -106,8 +109,10 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
   const bridgeOffline = !machineConnected;
   const classes = ['session-card swipe-card', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
 
-  // Show the unread dot only when no live-activity indicator is showing (matches SessionCard).
-  const showUnread = isUnread && session.state !== 'running' && session.state !== 'waiting_permission';
+  // Show the unread dot only when no live-activity/attention indicator is showing (matches SessionCard).
+  // The StatusDot below covers running/waiting_permission/waiting_question (CD-045) — don't double up.
+  const showUnread = isUnread && session.state !== 'running'
+    && session.state !== 'waiting_permission' && session.state !== 'waiting_question';
 
   return (
     <div className="swipe-track">
@@ -124,6 +129,7 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
             <span className="session-card-time">{relativeTime(session.lastActivity)}</span>
           </div>
         </div>
+        <StatusDot state={session.state} />
         {showUnread && <div className="session-unread-dot" />}
       </div>
     </div>
