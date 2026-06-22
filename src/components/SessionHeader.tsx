@@ -9,10 +9,21 @@ import { modelLabel, modelContextWindow } from '../constants/models';
 import UsageBadge from './UsageBadge';
 import '../styles/header.css';
 
-/** Context-window occupancy as an integer % of the model's max, or null if unknown. */
-function contextPct(contextTokens: number | undefined, modelId: string | undefined): number | null {
+/**
+ * Context-window occupancy as an integer % of the model's max, or null if unknown.
+ * Prefers the real window the bridge advertised (`windowOverride`, from the SDK's resolved
+ * `contextWindow` — honest about the active 1M beta); falls back to guessing from the model id
+ * only when the bridge didn't report one (older protocol / before the first result message).
+ */
+function contextPct(
+  contextTokens: number | undefined,
+  modelId: string | undefined,
+  windowOverride: number | undefined,
+): number | null {
   if (typeof contextTokens !== 'number' || contextTokens <= 0) { return null; }
-  const max = modelContextWindow(modelId);
+  const max = (typeof windowOverride === 'number' && windowOverride > 0)
+    ? windowOverride
+    : modelContextWindow(modelId);
   return Math.min(100, Math.round((contextTokens / max) * 100));
 }
 
@@ -60,6 +71,8 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   const sessionId = session?.id ?? remoteSession?.id;
   const contextTokens = useSessionStore((s) => sessionId ? s.remoteSessionContext[sessionId] : undefined);
   const liveModel = useSessionStore((s) => sessionId ? s.remoteSessionModel[sessionId] : undefined);
+  // Real context window the bridge advertised (protocol v4+) — the honest %-badge denominator.
+  const liveContextWindow = useSessionStore((s) => sessionId ? s.remoteSessionContextWindow[sessionId] : undefined);
   const configModel = useSessionStore((s) => s.config.model);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
   const setVoiceEnabled = useVoiceModeStore((s) => s.setEnabled);
@@ -154,7 +167,7 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
             <span className="header-model-badge">
               {modelLabel(liveModel ?? remoteSession.model ?? configModel)}
               {(() => {
-                const ctx = contextPct(contextTokens, liveModel ?? remoteSession.model ?? configModel);
+                const ctx = contextPct(contextTokens, liveModel ?? remoteSession.model ?? configModel, liveContextWindow ?? remoteSession.contextWindow);
                 return ctx !== null ? <span className="header-context-pct"> · {ctx}%</span> : null;
               })()}
             </span>

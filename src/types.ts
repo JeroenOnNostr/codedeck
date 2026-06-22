@@ -138,6 +138,11 @@ export interface RemoteSessionInfo {
   permissionMode?: AgentMode;
   effortLevel?: EffortLevel;
   model?: string;
+  /** Real context-window size (tokens) the bridge's SDK resolved for this session — the honest
+   *  denominator for the context-usage %. Present from protocol v4+ bridges once a result message
+   *  has arrived; reflects the actual 1M-beta window when active. Falls back to model-id guessing
+   *  when absent (older bridge or before first result). */
+  contextWindow?: number;
   committed?: boolean;
   state?: 'idle' | 'running' | 'waiting_permission' | 'waiting_question';
 }

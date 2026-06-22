@@ -69,6 +69,10 @@ interface SessionStore {
    *  (input + cache_read + cache_creation of the most recent turn), NOT a cumulative sum — it
    *  falls after /compact. Divided by the model's max context to show a context-usage %. */
   remoteSessionContext: Record<string, number>;
+  /** SDK-resolved context-window size (tokens) per session, advertised by protocol-v4+ bridges.
+   *  The honest denominator for the context-usage % — reflects the real 1M-beta window when active.
+   *  Absent for older bridges / before the first result, where the model-id guess is used instead. */
+  remoteSessionContextWindow: Record<string, number>;
   machineProtocolVersion: Record<string, number>; // keyed by machine pubkeyHex — bridge protocol version (>=1 supports model selection)
   historyLoading: Record<string, boolean>;
   refreshing: boolean;
@@ -354,8 +358,10 @@ export function adoptOptimisticSession(localId: string, session: RemoteSessionIn
     // Migrate per-session keyed state from the optimistic row id to the real id.
     const remoteSessionEffort = renameKey(state.remoteSessionEffort, rowId, session.id);
     const remoteSessionModel = renameKey(state.remoteSessionModel, rowId, session.id);
+    const remoteSessionContextWindow = renameKey(state.remoteSessionContextWindow, rowId, session.id);
     if (session.effortLevel && !remoteSessionEffort[session.id]) remoteSessionEffort[session.id] = session.effortLevel;
     if (session.model && !remoteSessionModel[session.id]) remoteSessionModel[session.id] = session.model;
+    if (session.contextWindow && !remoteSessionContextWindow[session.id]) remoteSessionContextWindow[session.id] = session.contextWindow;
 
     const readyTs = new Map(state.sessionReadyTimestamps);
     readyTs.set(session.id, Date.now());
@@ -378,6 +384,7 @@ export function adoptOptimisticSession(localId: string, session: RemoteSessionIn
       remoteSessionContext: renameKey(state.remoteSessionContext, rowId, session.id),
       remoteSessionEffort,
       remoteSessionModel,
+      remoteSessionContextWindow,
       unreadSessions: renameSetMember(state.unreadSessions, rowId, session.id),
       sessionReadyTimestamps: readyTs,
       optimisticSessions,
@@ -531,6 +538,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSettingPending: {},
   remoteSessionUsage: {},
   remoteSessionContext: {},
+  remoteSessionContextWindow: {},
   machineProtocolVersion: {},
   historyLoading: {},
   refreshing: false,
@@ -1129,12 +1137,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const cleanedOutputs = { ...state.outputs };
       const cleanedUsage = { ...state.tokenUsage };
       const cleanedContext = { ...state.remoteSessionContext };
+      const cleanedContextWindow = { ...state.remoteSessionContextWindow };
       const cleanedLoading = { ...state.historyLoading };
       for (const id of removedIds) {
         delete cleanedModes[id];
         delete cleanedOutputs[id];
         delete cleanedUsage[id];
         delete cleanedContext[id];
+        delete cleanedContextWindow[id];
         delete cleanedLoading[id];
         autoHistoryRequested.delete(id);
         seenBridgeSeqs.delete(id);
@@ -1146,6 +1156,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         outputs: cleanedOutputs,
         tokenUsage: cleanedUsage,
         remoteSessionContext: cleanedContext,
+        remoteSessionContextWindow: cleanedContextWindow,
         historyLoading: cleanedLoading,
       };
     });
@@ -1199,7 +1210,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
             const newSessionModes: Record<string, AgentMode> = {};
             const newSessionEffort: Record<string, EffortLevel> = {};
+            // Track the SDK-resolved context window the bridge reports (protocol v4+). It can change
+            // mid-session (first result fills it; 1M beta toggles), so always take the latest value.
+            const newSessionContextWindow: Record<string, number> = {};
             const merged = dedupedFiltered.map(incoming => {
+              if (incoming.contextWindow && state.remoteSessionContextWindow[incoming.id] !== incoming.contextWindow) {
+                newSessionContextWindow[incoming.id] = incoming.contextWindow;
+              }
               const prev = existingMap.get(incoming.id);
               if (!prev) {
                 // New session — initialize mode from bridge (default to 'plan')
@@ -1215,7 +1232,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               if (prev.title === incoming.title && prev.lastActivity === incoming.lastActivity
                   && prev.lineCount === incoming.lineCount && prev.project === incoming.project
                   && prev.cwd === incoming.cwd && prev.committed === incoming.committed
-                  && prev.state === incoming.state) {
+                  && prev.state === incoming.state && prev.contextWindow === incoming.contextWindow) {
                 return prev; // unchanged — keep same reference
               }
               return { ...prev, ...incoming, title: incoming.title ?? prev.title }; // merge updates, preserve non-null title
@@ -1307,6 +1324,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               remoteSessionEffort: Object.keys(newSessionEffort).length > 0
                 ? { ...state.remoteSessionEffort, ...newSessionEffort }
                 : state.remoteSessionEffort,
+              remoteSessionContextWindow: Object.keys(newSessionContextWindow).length > 0
+                ? { ...state.remoteSessionContextWindow, ...newSessionContextWindow }
+                : state.remoteSessionContextWindow,
               refreshing: false,
               ...(readyTsPruned ? { sessionReadyTimestamps: readyTsPruned } : {}),
               ...(dismissedPruned ? { dismissedSessionIds: dismissedPruned } : {}),
@@ -1650,6 +1670,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             // Seed model from session-ready payload so UI shows correct model immediately
             ...(session.model && !state.remoteSessionModel[session.id]
               ? { remoteSessionModel: { ...state.remoteSessionModel, [session.id]: session.model } }
+              : {}),
+            // Seed the real context window if the bridge already reported one
+            ...(session.contextWindow && !state.remoteSessionContextWindow[session.id]
+              ? { remoteSessionContextWindow: { ...state.remoteSessionContextWindow, [session.id]: session.contextWindow } }
               : {}),
           };
         });
@@ -2092,6 +2116,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const { [sessionId]: _p, ...restPending } = state.remoteSettingPending;
       const { [sessionId]: _su, ...restSessionUsage } = state.remoteSessionUsage;
       const { [sessionId]: _ctx, ...restContext } = state.remoteSessionContext;
+      const { [sessionId]: _cw, ...restContextWindow } = state.remoteSessionContextWindow;
       const { [sessionId]: _h, ...restLoading } = state.historyLoading;
 
       // Clean up grace-period tracking for deleted session
@@ -2108,6 +2133,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSettingPending: restPending,
         remoteSessionUsage: restSessionUsage,
         remoteSessionContext: restContext,
+        remoteSessionContextWindow: restContextWindow,
         historyLoading: restLoading,
         dismissedSessionIds: dismissed,
         sessionReadyTimestamps: readyTs,
@@ -2177,6 +2203,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSessionModel: snap.model
           ? { ...state.remoteSessionModel, [snap.sessionId]: snap.model }
           : state.remoteSessionModel,
+        remoteSessionContextWindow: snap.sessionInfo?.contextWindow
+          ? { ...state.remoteSessionContextWindow, [snap.sessionId]: snap.sessionInfo.contextWindow }
+          : state.remoteSessionContextWindow,
         dismissedSessionIds: dismissed,
         undoToast: null,
       };
