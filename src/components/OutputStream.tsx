@@ -241,7 +241,6 @@ function isFreeTextOption(label: string, index: number, total: number): boolean 
 
 function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: string }) {
   const sendKeypress = useSessionStore((s) => s.sendRemoteKeypress);
-  const sendMessage = useSessionStore((s) => s.sendMessage);
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const markResponded = useSessionStore((s) => s.markCardResponded);
   const clearPendingQuestion = useSessionStore((s) => s.clearPendingQuestion);
@@ -314,10 +313,13 @@ function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: 
     if (!trimmed || sending) return;
     setSending(true);
     try {
-      // If we selected a free-text option, the keypress was already sent.
-      // Now send the actual typed text as regular input.
+      // Route the typed answer through answerQuestion (question-input path), NOT sendMessage —
+      // sendMessage only forwards to question-input while the per-session pendingQuestions flag is
+      // still set and clears it, so any prior interaction (option tap / earlier answer) would strand
+      // this answer in regular input and wedge the bridge's AskUserQuestion. answerQuestion is
+      // flag-independent; the bridge matches it to the most-recent unanswered question.
       if (cardId) markResponded(sessionId, cardId);
-      await sendMessage(sessionId, trimmed);
+      await answerQuestion(sessionId, trimmed);
       setShowTextInput(false);
     } finally {
       setSending(false);
@@ -440,7 +442,6 @@ function QuestionEntry({ item, sessionId }: { item: QuestionDisplay; sessionId: 
 
 function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; sessionId: string }) {
   const sendKeypress = useSessionStore((s) => s.sendRemoteKeypress);
-  const sendMessage = useSessionStore((s) => s.sendMessage);
   const answerQuestion = useSessionStore((s) => s.answerQuestion);
   const markResponded = useSessionStore((s) => s.markCardResponded);
   const clearPendingQuestion = useSessionStore((s) => s.clearPendingQuestion);
@@ -570,7 +571,12 @@ function QuestionGroupEntry({ item, sessionId }: { item: QuestionGroupDisplay; s
     setSending(true);
     try {
       markResponded(sessionId, `${toolUseId}:q${activeTab}`);
-      await sendMessage(sessionId, trimmed);
+      // Route through answerQuestion (question-input path), NOT sendMessage. sendMessage only
+      // forwards to question-input while the single per-session pendingQuestions flag is set and
+      // clears it — so in a multi-question group the 2nd+ typed answer would leak to regular input
+      // and the bridge's AskUserQuestion would never resolve (session wedges). answerQuestion always
+      // routes to question-input; the bridge matches it to the first unanswered question in order.
+      await answerQuestion(sessionId, trimmed);
       setShowTextInput(false);
       setTextValue('');
     } finally {
