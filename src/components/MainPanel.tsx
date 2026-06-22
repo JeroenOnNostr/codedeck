@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, type CSSProperties } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useDmStore } from '../stores/dmStore';
 import { useUIStore } from '../stores/uiStore';
@@ -108,7 +108,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
     return idx !== -1 && idx > 0;
   }, [panelMode, orderedIds, activeSessionId]);
 
-  const { containerRef, touchHandlers } = useSwipeToNavigate({
+  const { sliderRef, touchHandlers } = useSwipeToNavigate({
     onSwipeLeft: () => panelMode === 'dm' ? navigateConversation('next') : navigateSession('next'),
     onSwipeRight: () => panelMode === 'dm' ? navigateConversation('prev') : navigateSession('prev'),
     enabled: isTouchDevice && (panelMode === 'session' || panelMode === 'dm'),
@@ -149,7 +149,6 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
 
   return (
     <div
-      ref={containerRef}
       {...touchHandlers}
       style={{
         flex: 1,
@@ -157,64 +156,96 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
         flexDirection: 'column',
         height: 'var(--app-height, 100%)',
         minWidth: 0,
+        overflow: 'hidden',
         background: 'var(--bg-black)',
       }}
     >
       <ErrorBoundary><VoiceModeRunner /></ErrorBoundary>
       <ErrorBoundary>
       {panelMode === 'dm' && activeConversationId ? (
-        <DmConversationView conversationId={activeConversationId} isWide={isWide} />
-      ) : panelMode === 'session' && activeSession ? (
-        <>
-          <SessionHeader session={activeSession} isWide={isWide} />
-          <OutputStream sessionId={activeSession.id} />
-          {activeSession.state === 'waiting_permission' && activeSession.pending_permissions.length > 0 && (
-            <PermissionBar session={activeSession} />
-          )}
-          <InputBar sessionId={activeSession.id} mode={activeSession.mode} effort={undefined} />
-        </>
-      ) : panelMode === 'session' && remoteSession ? (
-        <>
-          <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
-          <OutputStream sessionId={remoteSession.id} />
-          {optimisticStatus === 'failed' && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '10px 14px',
-              margin: '0 12px 8px',
-              borderRadius: 8,
-              background: 'var(--bg-error, rgba(220, 38, 38, 0.12))',
-              border: '1px solid var(--border-error, rgba(220, 38, 38, 0.4))',
-              fontSize: 13,
-            }}>
-              <span style={{ color: 'var(--text-muted)' }}>Couldn’t start the session.</span>
-              <button className="modal-secondary-btn" style={{ padding: '6px 14px', margin: 0 }} onClick={handleRetryOptimistic}>
-                Retry
-              </button>
-            </div>
-          )}
-          <RemotePermissionBar sessionId={remoteSession.id} />
-          <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} />
-        </>
+        // DM keeps the whole view in the slider (its input slides too, unchanged).
+        <div ref={sliderRef} style={SWIPE_CONTENT_STYLE}>
+          <DmConversationView conversationId={activeConversationId} isWide={isWide} />
+        </div>
       ) : (
         <>
-          <SessionHeader isWide={isWide} />
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--text-muted)',
-            fontSize: 15,
-          }}>
-            Select or create a session to get started
+          {/* Only the session content slides. A single stable slider element is
+              reused across local/remote/empty so the slide-in animation isn't
+              broken when the active session switches mid-transition. */}
+          <div ref={sliderRef} style={SWIPE_CONTENT_STYLE}>
+            {panelMode === 'session' && activeSession ? (
+              <>
+                <SessionHeader session={activeSession} isWide={isWide} />
+                <OutputStream sessionId={activeSession.id} />
+              </>
+            ) : panelMode === 'session' && remoteSession ? (
+              <>
+                <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
+                <OutputStream sessionId={remoteSession.id} />
+              </>
+            ) : (
+              <>
+                <SessionHeader isWide={isWide} />
+                <div style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-muted)',
+                  fontSize: 15,
+                }}>
+                  Select or create a session to get started
+                </div>
+              </>
+            )}
           </div>
+
+          {/* Static action surface — stays put while content slides. */}
+          {panelMode === 'session' && activeSession ? (
+            <>
+              {activeSession.state === 'waiting_permission' && activeSession.pending_permissions.length > 0 && (
+                <PermissionBar session={activeSession} />
+              )}
+              <InputBar sessionId={activeSession.id} mode={activeSession.mode} effort={undefined} />
+            </>
+          ) : panelMode === 'session' && remoteSession ? (
+            <>
+              {optimisticStatus === 'failed' && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '10px 14px',
+                  margin: '0 12px 8px',
+                  borderRadius: 8,
+                  background: 'var(--bg-error, rgba(220, 38, 38, 0.12))',
+                  border: '1px solid var(--border-error, rgba(220, 38, 38, 0.4))',
+                  fontSize: 13,
+                }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Couldn’t start the session.</span>
+                  <button className="modal-secondary-btn" style={{ padding: '6px 14px', margin: 0 }} onClick={handleRetryOptimistic}>
+                    Retry
+                  </button>
+                </div>
+              )}
+              <RemotePermissionBar sessionId={remoteSession.id} />
+              <InputBar sessionId={remoteSession.id} mode={remoteMode} effort={remoteEffort} />
+            </>
+          ) : null}
         </>
       )}
       </ErrorBoundary>
     </div>
   );
 }
+
+// The swipeable content region (header + output). Only this element translates;
+// the hook writes `transform`/`transition` imperatively, so they must not be set here.
+const SWIPE_CONTENT_STYLE: CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  minWidth: 0,
+};

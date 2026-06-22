@@ -6,9 +6,14 @@ const DEBOUNCE_MS = 400;
 const SLIDE_DURATION = 200;
 
 /**
- * Hook that detects horizontal swipe gestures on a container element
- * to navigate between sessions. Follows the same ref-based DOM
- * manipulation pattern as useSwipeToDelete.
+ * Hook that detects horizontal swipe gestures to navigate between sessions.
+ * Follows the same ref-based DOM manipulation pattern as useSwipeToDelete.
+ *
+ * Two elements are involved, deliberately decoupled:
+ *  - `touchHandlers` go on the outer touch target (the whole panel) so a swipe
+ *    can start anywhere, including over the input bar.
+ *  - `sliderRef` goes on the inner element that actually translates — only the
+ *    session content (header + output), so the input box and buttons stay put.
  */
 export function useSwipeToNavigate(options: {
   onSwipeLeft: () => void;
@@ -25,10 +30,10 @@ export function useSwipeToNavigate(options: {
   const swipingRef = useRef(false);
   const directionLockedRef = useRef(false);
   const lastSwipeTimeRef = useRef(0);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const sliderRef = useRef<HTMLDivElement>(null);
 
   const snapBack = useCallback(() => {
-    const el = containerRef.current;
+    const el = sliderRef.current;
     if (!el) return;
     el.style.transition = `transform ${SLIDE_DURATION}ms ease-out`;
     el.style.transform = 'translateX(0)';
@@ -39,10 +44,10 @@ export function useSwipeToNavigate(options: {
    * then slide new content in from the opposite direction.
    */
   const slideOut = useCallback((exitOffset: string, onSwipe: () => void, enterOffset: string) => {
-    const el = containerRef.current;
+    const el = sliderRef.current;
     if (!el) return;
-    // Phase 1: slide out
-    el.style.transition = `transform ${SLIDE_DURATION}ms ease-out`;
+    // Phase 1: slide out (accelerate away)
+    el.style.transition = `transform ${SLIDE_DURATION}ms ease-in`;
     el.style.transform = `translateX(${exitOffset})`;
     setTimeout(() => {
       // Phase 2: switch session, position at enter side (no transition)
@@ -66,7 +71,7 @@ export function useSwipeToNavigate(options: {
     currentXRef.current = 0;
     swipingRef.current = false;
     directionLockedRef.current = false;
-    const el = containerRef.current;
+    const el = sliderRef.current;
     if (el) {
       el.style.transition = 'none';
     }
@@ -98,7 +103,7 @@ export function useSwipeToNavigate(options: {
     if (dx > 0 && !canSwipeRight) return;
 
     currentXRef.current = dx;
-    const el = containerRef.current;
+    const el = sliderRef.current;
     if (el) {
       el.style.transform = `translateX(${dx * DAMPEN}px)`;
     }
@@ -140,7 +145,7 @@ export function useSwipeToNavigate(options: {
   }, [onSwipeLeft, onSwipeRight, snapBack, canSwipeLeft, canSwipeRight]);
 
   return {
-    containerRef,
+    sliderRef,
     touchHandlers: { onTouchStart, onTouchMove, onTouchEnd },
   };
 }
