@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { Session, RemoteSessionInfo } from '../types';
 import { useUIStore } from '../stores/uiStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -102,6 +102,26 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
     void sendMessage(remoteSession.id, '/compact');
   };
 
+  // Overflow (⋯) menu — home for rarely-used, remote-only actions (currently just /compact),
+  // keeping them off the top-level header so the title has room. Closes on outside tap / Escape.
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const onDocPointer = (e: PointerEvent) => {
+      if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+        setOverflowOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOverflowOpen(false); };
+    document.addEventListener('pointerdown', onDocPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [overflowOpen]);
+
   return (
     <div className="session-header">
       {isTouchDevice && attention.left && (
@@ -137,17 +157,37 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
       )}
 
       {remoteSession && (
-        <button
-          className="header-btn header-compact"
-          onClick={handleCompact}
-          aria-label="Compact conversation"
-          title="Compact conversation (/compact) — summarize history to free up context"
-        >
-          {/* compress / merge-to-center icon */}
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-            <path d="M4 9h4V5h2v6H4V9zm10 0V5h2v4h4v2h-6V9zM4 13h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z"/>
-          </svg>
-        </button>
+        <div className="header-overflow" ref={overflowRef}>
+          <button
+            className="header-btn header-overflow-btn"
+            onClick={() => setOverflowOpen((o) => !o)}
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={overflowOpen}
+            title="More actions"
+          >
+            {/* horizontal meatball (⋯) icon */}
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>
+            </svg>
+          </button>
+          {overflowOpen && (
+            <div className="header-overflow-menu" role="menu">
+              <button
+                className="header-overflow-item"
+                role="menuitem"
+                onClick={() => { handleCompact(); setOverflowOpen(false); }}
+                title="Compact conversation (/compact) — summarize history to free up context"
+              >
+                {/* compress / merge-to-center icon */}
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <path d="M4 9h4V5h2v6H4V9zm10 0V5h2v4h4v2h-6V9zM4 13h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z"/>
+                </svg>
+                <span>Compact conversation</span>
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {session ? (

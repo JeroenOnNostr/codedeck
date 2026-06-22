@@ -92,8 +92,18 @@
 
 .right-controls {
   display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* Slim stacked mic/stop pair sitting to the left of the big SEND button. */
+.right-controls-secondary {
+  display: flex;
   flex-direction: column;
   gap: 4px;
+  width: 40px;
+  flex-shrink: 0;
 }
 
 .mode-btn {
@@ -182,12 +192,14 @@
 }
 
 .send-btn {
-  height: 32px;
+  /* Roughly 2× the old 32px — matches .input-textarea min-height so it bottom-aligns cleanly,
+     making SEND the prominent primary action of the composer. */
+  height: 68px;
   padding: 0 12px;
-  min-width: 60px;
+  min-width: 64px;
   background: var(--bg-surface);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -214,7 +226,9 @@
 
 .mic-btn {
   height: 32px;
-  min-width: 60px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   border-radius: 4px;
   display: flex;
   align-items: center;
@@ -243,7 +257,9 @@
 
 .stop-btn {
   height: 32px;
-  min-width: 60px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   border-radius: 4px;
   display: flex;
   align-items: center;

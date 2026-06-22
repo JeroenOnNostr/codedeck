@@ -5,16 +5,66 @@
   padding: calc(0px + env(safe-area-inset-top, 0px)) 16px 0;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  gap: 12px;
+  gap: 8px;
 }
 
 .header-btn {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+/* Overflow (⋯) menu — anchors a popover beneath the button for secondary actions. */
+.header-overflow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.header-overflow-btn {
+  color: var(--text-secondary);
+}
+
+.header-overflow-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.header-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.header-overflow-item:hover {
+  background: var(--bg-surface);
+}
+
+.header-overflow-item svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .header-hamburger {
@@ -96,11 +146,12 @@
 .header-meta {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  align-self: flex-start;
-  gap: 3px;
+  /* stretch → both badges share the wider one's width so their edges line up into a tidy block;
+     center → the block floats off the top safe-area and the bottom separator line. */
+  align-items: stretch;
+  align-self: center;
+  gap: 6px;
   flex-shrink: 0;
-  padding-top: 4px;
 }
 
 /* Current model — always shown, pinned to the top-right corner of the header. */
@@ -112,6 +163,8 @@
   border-radius: 3px;
   padding: 1px 5px;
   white-space: nowrap;
+  /* keep the label right-aligned now that the badge stretches to the meta column width */
+  text-align: right;
 }
 
 /* Context-window occupancy %, bundled into the model badge — secondary to the model name. */

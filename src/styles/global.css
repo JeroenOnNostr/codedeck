@@ -61,6 +61,9 @@ html, body, #root {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Disable double-tap zoom + tap delay (pinch-zoom is blocked via the viewport meta).
+     'manipulation' still allows normal scroll/pan, so the virtualized output list is unaffected. */
+  touch-action: manipulation;
 }
 
 #root {
