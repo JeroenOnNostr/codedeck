@@ -5,6 +5,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useVoiceModeStore } from '../stores/voiceModeStore';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useOrderedSessionIds } from '../hooks/useOrderedSessionIds';
+import { sessionNeedsAttention } from '../utils/sessionNeedsAttention';
 import { modelLabel, modelContextWindow } from '../constants/models';
 import UsageBadge from './UsageBadge';
 import '../styles/header.css';
@@ -34,6 +35,8 @@ function contextPct(
 function useAttentionDirection(sessionId: string | undefined) {
   const orderedIds = useOrderedSessionIds();
   const sessions = useSessionStore((s) => s.sessions);
+  const machines = useSessionStore((s) => s.machines);
+  const remoteSessions = useSessionStore((s) => s.remoteSessions);
   const unreadSessions = useSessionStore((s) => s.unreadSessions);
 
   return useMemo(() => {
@@ -42,12 +45,19 @@ function useAttentionDirection(sessionId: string | undefined) {
     const currentIndex = orderedIds.indexOf(sessionId);
     if (currentIndex === -1 || orderedIds.length <= 1) return { left: false, right: false };
 
-    const needsAttention = (id: string) => {
-      if (unreadSessions.has(id)) return true;
-      const local = sessions.find(s => s.id === id);
-      if (local?.state === 'waiting_permission') return true;
-      return false;
-    };
+    // Flatten state for every session (local + remote) so the shared predicate sees
+    // the real waiting_* state for bridge sessions too — not just unread. Matches the
+    // sidebar's attention dot exactly.
+    const stateById = new Map<string, Session['state'] | RemoteSessionInfo['state']>();
+    for (const s of sessions) stateById.set(s.id, s.state);
+    for (const machine of machines) {
+      for (const rs of remoteSessions[machine.pubkeyHex] || []) {
+        if (rs.state) stateById.set(rs.id, rs.state);
+      }
+    }
+
+    const needsAttention = (id: string) =>
+      sessionNeedsAttention(stateById.get(id), unreadSessions.has(id));
 
     // Left = previous sessions (indices before current)
     let left = false;
@@ -62,7 +72,7 @@ function useAttentionDirection(sessionId: string | undefined) {
     }
 
     return { left, right };
-  }, [sessionId, orderedIds, sessions, unreadSessions]);
+  }, [sessionId, orderedIds, sessions, machines, remoteSessions, unreadSessions]);
 }
 
 export default function SessionHeader({ session, remoteSession, isWide, bridgeSupportsUsage }: { session?: Session; remoteSession?: RemoteSessionInfo; isWide: boolean; bridgeSupportsUsage?: boolean }) {

@@ -6,6 +6,7 @@ import { useSwipeToDelete } from '../hooks/useSwipeToDelete';
 import { parsePublicKey, getDebugInfo } from '../services/nostrService';
 import { subscribe as debugSubscribe, getLogEntries, clearLog } from '../services/debugLog';
 import { relativeTime } from '../utils/relativeTime';
+import { sessionNeedsAttention } from '../utils/sessionNeedsAttention';
 import { Session, RemoteSessionInfo } from '../types';
 import DmTile from './DmTile';
 import '../styles/sidebar.css';
@@ -14,14 +15,18 @@ import '../styles/dm.css';
 const PULL_THRESHOLD = 60;
 const MAX_PULL = 100;
 
-function StatusDot({ state }: { state: Session['state'] | RemoteSessionInfo['state'] }) {
-  if (!state || state === 'idle' || state === 'completed' || state === 'error') return null;
-
-  // Both attention states (plan-approval / permission, and AskUserQuestion) get the
-  // amber "waiting" dot so they stand out in the list; everything else is "running".
-  const waiting = state === 'waiting_permission' || state === 'waiting_question';
-  const cls = waiting ? 'status-dot waiting' : 'status-dot running';
-  return <div className={cls} />;
+function StatusDot({ state, isUnread }: { state: Session['state'] | RemoteSessionInfo['state']; isUnread: boolean }) {
+  // One unmistakable dot for "needs me" — blocked on the user (plan/permission
+  // approval or AskUserQuestion) OR unread. Solid + bold (see .attention-dot);
+  // shows even on the foreground/active session.
+  if (sessionNeedsAttention(state, isUnread)) {
+    return <div className="attention-dot" aria-label="Needs attention" />;
+  }
+  // Keep the actively-working indicator subtle so it doesn't compete for attention.
+  if (state === 'running') {
+    return <div className="status-dot running" />;
+  }
+  return null;
 }
 
 function stateClass(state: Session['state']): string {
@@ -47,9 +52,6 @@ function SessionCard({ session, isSelected }: { session: Session; isSelected: bo
     stateClass(session.state),
   ].filter(Boolean).join(' ');
 
-  // Show unread dot only when StatusDot is absent (idle/completed/error)
-  const showUnread = isUnread && session.state !== 'running' && session.state !== 'waiting_permission';
-
   return (
     <div className="swipe-track">
       <div className="swipe-delete-backdrop"><span className="swipe-delete-text">Delete</span></div>
@@ -60,8 +62,7 @@ function SessionCard({ session, isSelected }: { session: Session; isSelected: bo
           <div className="session-card-name">{session.name}</div>
           <div className="session-card-path">{session.workspace_path} · {session.branch}</div>
         </div>
-        <StatusDot state={session.state} />
-        {showUnread && <div className="session-unread-dot" />}
+        <StatusDot state={session.state} isUnread={isUnread} />
       </div>
     </div>
   );
@@ -109,11 +110,6 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
   const bridgeOffline = !machineConnected;
   const classes = ['session-card swipe-card', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
 
-  // Show the unread dot only when no live-activity/attention indicator is showing (matches SessionCard).
-  // The StatusDot below covers running/waiting_permission/waiting_question (CD-045) — don't double up.
-  const showUnread = isUnread && session.state !== 'running'
-    && session.state !== 'waiting_permission' && session.state !== 'waiting_question';
-
   return (
     <div className="swipe-track">
       <div className="swipe-delete-backdrop"><span className="swipe-delete-text">Delete</span></div>
@@ -129,8 +125,7 @@ function RemoteSessionCard({ session, isSelected, machineConnected }: { session:
             <span className="session-card-time">{relativeTime(session.lastActivity)}</span>
           </div>
         </div>
-        <StatusDot state={session.state} />
-        {showUnread && <div className="session-unread-dot" />}
+        <StatusDot state={session.state} isUnread={isUnread} />
       </div>
     </div>
   );
