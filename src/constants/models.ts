@@ -11,13 +11,14 @@
  */
 export interface ModelInfo {
   id: string;
-  /** Compact label for the InputBar button + badges, e.g. 'O4.8'. */
+  /** Compact label for the InputBar button + badges, e.g. 'O5'. */
   label: string;
-  /** Full display name, e.g. 'Claude Opus 4.8'. */
+  /** Full display name, e.g. 'Claude Opus 5'. */
   name: string;
 }
 
 export const MODELS: ModelInfo[] = [
+  { id: 'claude-opus-5', label: 'O5', name: 'Claude Opus 5' },
   { id: 'claude-opus-4-8', label: 'O4.8', name: 'Claude Opus 4.8' },
   { id: 'claude-opus-4-7', label: 'O4.7', name: 'Claude Opus 4.7' },
   { id: 'claude-sonnet-4-6', label: 'S4.6', name: 'Claude Sonnet 4.6' },
@@ -26,7 +27,7 @@ export const MODELS: ModelInfo[] = [
 ];
 
 /** Default model for new sessions and fresh installs. */
-export const DEFAULT_MODEL = 'claude-opus-4-8';
+export const DEFAULT_MODEL = 'claude-opus-5';
 
 /** Standard Claude context window. */
 const CONTEXT_WINDOW_DEFAULT = 200_000;

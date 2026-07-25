@@ -60,7 +60,7 @@ impl Default for AppConfig {
             notifications_enabled: true,
             workspace_base_path: String::new(),
             max_sessions: 20,
-            model: "claude-opus-4-8".to_string(),
+            model: "claude-opus-5".to_string(),
             show_session_metadata: true,
             show_mode_badge: true,
             show_commit_badge: true,
@@ -159,11 +159,11 @@ mod tests {
         );
         assert_eq!(full.anthropic_api_key, Some("sk-ant-test".into()));
         assert_eq!(full.github_pat, Some("ghp_test".into()));
-        assert_eq!(full.model, "claude-opus-4-8");
+        assert_eq!(full.model, "claude-opus-5");
         assert!(full.show_model_badge);
 
         let back = full.to_app_config();
-        assert_eq!(back.model, "claude-opus-4-8");
+        assert_eq!(back.model, "claude-opus-5");
         // Secrets should not be in the non-secret config
         // (they don't exist on AppConfig at all)
     }

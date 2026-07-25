@@ -44,6 +44,7 @@ impl TokenUsage {
         // Specific matches must come before the generic `opus`/`sonnet` fallbacks.
         let (input_rate, output_rate) = match model {
             m if m.contains("fable") => (10.0, 50.0),       // Fable 5
+            m if m.contains("opus-5") => (5.0, 25.0),       // Opus 5
             m if m.contains("opus-4-8") => (5.0, 25.0),     // Opus 4.8
             m if m.contains("opus-4-7") => (5.0, 25.0),     // Opus 4.7
             m if m.contains("opus") => (15.0, 75.0),        // older Opus (4.6 and earlier)
@@ -302,6 +303,15 @@ mod tests {
     }
 
     #[test]
+    fn token_usage_add_opus_5_pricing() {
+        let mut usage = TokenUsage::default();
+        usage.add(1_000_000, 1_000_000, "claude-opus-5");
+        // Opus 5: $5/1M input + $25/1M output = $30 (must not fall through to the
+        // generic `opus` arm, which is the older $15/$75 tier).
+        assert!((usage.total_cost_usd - 30.0).abs() < 0.01);
+    }
+
+    #[test]
     fn token_usage_add_sonnet_pricing() {
         let mut usage = TokenUsage::default();
         usage.add(1_000_000, 1_000_000, "claude-sonnet-4-20250514");
@@ -313,8 +323,8 @@ mod tests {
     fn token_usage_add_haiku_pricing() {
         let mut usage = TokenUsage::default();
         usage.add(1_000_000, 1_000_000, "claude-haiku-4-5-20251001");
-        // haiku: $0.80/1M input + $4.0/1M output = $4.80
-        assert!((usage.total_cost_usd - 4.80).abs() < 0.01);
+        // haiku: $1/1M input + $5/1M output = $6.00
+        assert!((usage.total_cost_usd - 6.00).abs() < 0.01);
     }
 
     #[test]
@@ -403,7 +413,9 @@ mod tests {
     fn persistence_load_missing_config_returns_default() {
         let (p, dir) = temp_persistence();
         let config = p.load_config().unwrap();
-        assert_eq!(config.model, "claude-sonnet-4-20250514");
+        // Missing config falls back to AppConfig::default(), whose model tracks the
+        // current default (see config.rs) — don't hardcode a model ID here.
+        assert_eq!(config.model, crate::config::AppConfig::default().model);
         assert!(config.github_username.is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
