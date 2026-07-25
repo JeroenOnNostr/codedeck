@@ -3,7 +3,7 @@ name = "codedeck"
 # Cargo requires strict 3-part semver (no leading zeros, no 4th component), so the crate uses the
 # unpadded date. The user-facing version (package.json, tauri.conf.json, Android versionName,
 # GitHub/Zapstore releases) is the zero-padded 2026.06.17 — keep these in lockstep on each release.
-version = "2026.6.17"
+version = "2026.7.25"
 description = "CodeDeck - Multi-session AI coding agent"
 authors = ["you"]
 license = ""
