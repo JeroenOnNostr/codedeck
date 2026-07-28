@@ -12,6 +12,7 @@ export default function NewSessionModal() {
   const sessions = useSessionStore((s) => s.sessions);
   const remoteSessions = useSessionStore((s) => s.remoteSessions);
   const defaultModel = useSessionStore((s) => s.config.model);
+  const machineProtocolVersion = useSessionStore((s) => s.machineProtocolVersion);
   const [name, setName] = useState('');
   const [group, setGroup] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
@@ -33,6 +34,9 @@ export default function NewSessionModal() {
         .filter(Boolean)
         .filter(p => p !== 'Waiting for Claude Code...' && p !== 'Starting session…'),
     )];
+
+    // CDB-033 landed in bridge protocol v8. Older bridges drop `cwd` without a word.
+    const supportsProjectDir = (machineProtocolVersion[machine.pubkeyHex] ?? 0) >= 8;
 
     const handleRemoteCreate = () => {
       // Open a usable session view instantly; the real session reconciles in the
@@ -59,25 +63,30 @@ export default function NewSessionModal() {
             </>
           )}
 
-          <label className="modal-label">Project folder</label>
-          <input
-            className="modal-input"
-            value={projectDir}
-            onChange={(e) => setProjectDir(e.target.value)}
-            placeholder="workspace root"
-            list="project-dirs"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <datalist id="project-dirs">
-            {projects.map((p) => <option key={p} value={p} />)}
-          </datalist>
+          {/* A pre-v8 bridge ignores `cwd` silently, so offering the field there would be a lie —
+              the session would open at the workspace root with nothing saying so (CDB-033). */}
+          {supportsProjectDir && (
+            <>
+              <label className="modal-label">Project folder</label>
+              <input
+                className="modal-input"
+                value={projectDir}
+                onChange={(e) => setProjectDir(e.target.value)}
+                placeholder="workspace root"
+                list="project-dirs"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <datalist id="project-dirs">
+                {projects.map((p) => <option key={p} value={p} />)}
+              </datalist>
+            </>
+          )}
           <p className="modal-hint" style={{ marginBottom: 24 }}>
-            Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the
-            workspace root, or name a subdirectory to root the session in one project — tools that read
-            the session's directory, GSD above all, then see that project instead of the whole workspace.
-            Session name is assigned automatically.
+            {supportsProjectDir
+              ? `Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the workspace root, or name a subdirectory to root the session in one project — tools that read the session's directory, GSD above all, then see that project instead of the whole workspace. Session name is assigned automatically.`
+              : `Opens a new Claude Code terminal in the VSCode workspace. Session name and project are assigned automatically. Update the bridge to choose a project folder for the session.`}
           </p>
 
           <label className="modal-label">Model</label>
