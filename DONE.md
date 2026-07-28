@@ -1,5 +1,9 @@
 # Done — Codedeck
 
+## Zapstore release 2026.07.28 — CodeDeck 2026.7.28 (2026-07-28)
+
+- [x] **Published CodeDeck `2026.7.28` to Zapstore** — fresh universal APK built from `feat/gsd-stage-strip`, shipping the GSD stage strip (**CD-052**, which itself stays open in TODO.md pending device-verify). versionCode `20260728`, cert SHA-256 `c5d0cba4…fbc5`, matching the kind-30509 NIP-C1 identity proof already on the relay. Signer proven **before** publishing via `zsp publish -q --offline`: all three events resolved to `f07e0b1a…c367`, the listing owner — a mismatch would have forked the listing instead of updating it. Events 32267 / 30063 / 3063 landed `2026-07-28T15:01:08Z`; CDN blob `9226c9f9…24f9` fetched back and verified byte-identical to the local APK. `zapstore.yaml` temp-injection (`release_notes` / `release_source` / `version`) reverted after, per `kubo/docs/zapstore-publish.md`. Companion bridge bumped to `2026.7.28` (commit `cc31486`) because the release notes name it as a requirement — **the VSIX is not published yet**, so the strip is inert for users until it is. (2026-07-28)
+
 ## Zapstore release 2026.7.25 + bunker-secret gitignore hole closed (2026-07-28)
 
 - [x] **CD-051: `.env.zapstore` backups were not gitignored** — `.gitignore` ignored `.env.zapstore` but nothing else matching it, and the publish flow leaves rotation backups next to it. `.env.zapstore.bak` was sitting untracked in the working tree containing a live `bunker://...&secret=...` URL, so any `git add -A` would have committed a Nostr signing secret to a public repo. Widened the rule to `.env.zapstore.*` so `.bak` / `.pre-<date>` copies are covered too. Found while doing the Zapstore publish below. (commit `bfd57f5`, 2026-07-28)
