@@ -89,6 +89,8 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   const remoteGsd = useSessionStore((s) => sessionId ? s.remoteSessionGsd[sessionId] : undefined);
   const gsdEnabled = useSessionStore((s) => sessionId ? s.gsdEnabledSessions[sessionId] === true : false);
   const setGsdEnabled = useSessionStore((s) => s.setGsdEnabled);
+  const machine = useSessionStore((s) => sessionId ? s.getMachineForSession(sessionId) : undefined);
+  const setNewSessionOpen = useUIStore((s) => s.setNewSessionOpen);
   const configModel = useSessionStore((s) => s.config.model);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
   const setVoiceEnabled = useVoiceModeStore((s) => s.setEnabled);
@@ -176,6 +178,22 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
           </button>
           {overflowOpen && (
             <div className="header-overflow-menu" role="menu">
+              {/* CD-058. The direct route to what the whole GSD strip exists for: a brand-new
+                  project, in its own folder, with the workflow already running. Offered from any
+                  session so it never depends on standing in the right directory first. */}
+              {remoteGsd?.installed && (
+                <button
+                  className="header-overflow-item"
+                  role="menuitem"
+                  onClick={() => { setNewSessionOpen(true, machine ?? null, true); setOverflowOpen(false); }}
+                  title="Create a project folder and start the GSD workflow in it"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z"/>
+                  </svg>
+                  <span>New GSD project…</span>
+                </button>
+              )}
               {/* GSD is opt-in PER SESSION: a project that already has .planning/ shows the strip
                   on its own, so this only matters for turning a fresh project into a GSD one. */}
               {remoteGsd?.installed && !remoteGsd.available && (
@@ -188,7 +206,7 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                     <path d="M4 5h16v2H4V5zm0 6h10v2H4v-2zm0 6h16v2H4v-2z"/>
                   </svg>
-                  <span>{gsdEnabled ? 'Hide GSD setup' : 'Enable GSD for this session'}</span>
+                  <span>{gsdEnabled ? 'Hide GSD setup' : 'Set up GSD in this project'}</span>
                 </button>
               )}
               <button

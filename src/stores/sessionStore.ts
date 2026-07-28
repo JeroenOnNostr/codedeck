@@ -31,6 +31,33 @@ import { DEFAULT_MODEL } from '../constants/models';
 import { useDmStore } from './dmStore';
 import { useUIStore } from './uiStore';
 
+/** Everything New Session can ask the bridge for. An options object rather than positionals
+ *  because the list crossed the point (test/model/cwd/create/GSD) where argument order was the
+ *  only thing keeping the two call sites honest. */
+export interface RemoteSessionCreateOptions {
+  testSession?: boolean;
+  model?: string;
+  /** Project subdirectory to root the session in (CDB-033). Omitted = workspace root. */
+  cwd?: string;
+  /** Create + `git init` that subdirectory when it doesn't exist yet (CD-057). */
+  createCwd?: boolean;
+  /** Kick off the GSD workflow as soon as the session is live (CD-058). See `GsdKickoff`. */
+  gsd?: GsdKickoff;
+}
+
+/**
+ * "Start a new GSD project" is two things the session must do the moment it exists, in order:
+ * leave plan mode (GSD's workflows *write* — in plan mode Claude Code plans instead of running
+ * them), then send the command. Sequenced through `mode-confirmed` rather than fired together,
+ * because a command that lands first runs its whole first turn in the wrong mode.
+ */
+export interface GsdKickoff {
+  /** Slash command to send once the mode is confirmed, e.g. `/gsd-new-project`. */
+  command: string;
+  /** Mode to switch to first. 'default' = hands-free, 'acceptEdits' = still asks for commands. */
+  mode: AgentMode;
+}
+
 /** A locally-created session shown instantly on "Start Session" — before the bridge
  *  round-trips a real session id back. Reconciled into the real session on session-ready. */
 interface OptimisticSession {
@@ -44,6 +71,8 @@ interface OptimisticSession {
   cwd?: string;
   /** Whether that subdirectory should be created + git init-ed if absent; replayed on retry. */
   createCwd?: boolean;
+  /** Pending GSD kickoff (CD-058) — run once the real session id arrives; replayed on retry. */
+  gsd?: GsdKickoff;
   /** Set once the bridge's session-pending for this create is associated with us. */
   pendingId?: string;
   /** First message(s) typed before the real session existed — flushed to the wire on adoption. */
@@ -73,6 +102,11 @@ interface SessionStore {
   /** GSD workflow snapshot per sessionId. Absent, or `available: false`, means the session's
    *  cwd isn't a GSD project (or the bridge predates protocol v6) — the stage strip stays hidden. */
   remoteSessionGsd: Record<string, GsdState>;
+  /** Sessions that have already had a GSD setup command sent (CD-058). Between sending
+   *  `/gsd-new-project` and GSD writing `.planning/`, the project still looks un-set-up, so the
+   *  strip would keep offering to start it — and tapping that restarts the interview from zero.
+   *  Persisted alongside the opt-in so an app restart mid-interview doesn't re-arm that trap. */
+  gsdStartedSessions: Record<string, boolean>;
   /** Sessions the user explicitly opted into GSD on, keyed by sessionId. Only consulted when the
    *  project has no `.planning/` yet — a real GSD project always shows the strip. Persisted, so
    *  opting in survives a restart. */
@@ -134,6 +168,8 @@ interface SessionStore {
   refreshUsage: (sessionId: string) => Promise<void>;
   refreshGsd: (sessionId: string) => Promise<void>;
   setGsdEnabled: (sessionId: string, enabled: boolean) => void;
+  /** Record that a GSD setup command has gone out for this session (CD-058). */
+  markGsdStarted: (sessionId: string) => void;
   setRemoteSessionModeLocal: (sessionId: string, mode: AgentMode) => void;
   updateConfig: (config: AppConfig) => Promise<void>;
   initEventListeners: () => Promise<void>;
@@ -150,10 +186,9 @@ interface SessionStore {
   getMachineForSession: (sessionId: string) => RemoteMachine | null;
   requestSessionHistory: (sessionId: string) => Promise<void>;
   requestRefreshSessions: () => void;
-  createRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string, cwd?: string, createCwd?: boolean) => Promise<void>;
+  createRemoteSession: (machine: RemoteMachine, opts?: RemoteSessionCreateOptions) => Promise<void>;
   /** Optimistic create: opens a usable session view instantly, then fires the real create. */
-  /** `cwd`: optional project subdirectory to root the session in (CDB-033). Omitted = workspace root. */
-  startOptimisticRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string, cwd?: string, createCwd?: boolean) => void;
+  startOptimisticRemoteSession: (machine: RemoteMachine, opts?: RemoteSessionCreateOptions) => void;
   /** Re-fire a create for an optimistic session that timed out or failed. */
   retryOptimisticSession: (localId: string) => void;
   deleteRemoteSession: (sessionId: string) => void;
@@ -341,6 +376,59 @@ function armOptimisticTimeout(localId: string, set: SetFn, get: () => SessionSto
   }, OPTIMISTIC_NO_ACK_TIMEOUT_MS);
 }
 
+/**
+ * Sessions waiting on `mode-confirmed` before their GSD command is sent (CD-058), plus the
+ * fallback timer that sends anyway. Module-level rather than store state: nothing renders it,
+ * and a timer handle has no business being persisted.
+ */
+const pendingGsdKickoffs = new Map<string, { command: string; timerId: ReturnType<typeof setTimeout> }>();
+
+/** How long to wait for `mode-confirmed` before sending the GSD command regardless. A bridge that
+ *  never confirms (older, or the control request failed) must not silently swallow the whole
+ *  feature — a wrong-mode run is recoverable, a run that never happens looks exactly like the bug
+ *  this replaces. */
+const GSD_KICKOFF_FALLBACK_MS = 6_000;
+
+/** Test seam + teardown: drop any armed kickoff without firing it. */
+export function cancelGsdKickoff(sessionId: string): void {
+  const pending = pendingGsdKickoffs.get(sessionId);
+  if (!pending) return;
+  clearTimeout(pending.timerId);
+  pendingGsdKickoffs.delete(sessionId);
+}
+
+/** Send an armed GSD command now (mode confirmed, or the fallback fired). No-op if none armed. */
+export function fireGsdKickoff(sessionId: string, get: () => SessionStore): void {
+  const pending = pendingGsdKickoffs.get(sessionId);
+  if (!pending) return;
+  clearTimeout(pending.timerId);
+  pendingGsdKickoffs.delete(sessionId);
+  void get().sendMessage(sessionId, pending.command);
+}
+
+/**
+ * Start the GSD workflow on a freshly adopted session: opt the stage strip in, switch out of plan
+ * mode, and arm the command to go out as soon as that mode change is confirmed.
+ */
+export function startGsdKickoff(sessionId: string, kickoff: GsdKickoff, get: () => SessionStore): void {
+  // Opt the strip in immediately: this session is a GSD project by construction, and without this
+  // the strip stays hidden until `.planning/` exists — i.e. for the entire interview.
+  get().setGsdEnabled(sessionId, true);
+
+  get().markGsdStarted(sessionId);
+
+  cancelGsdKickoff(sessionId);
+  const timerId = setTimeout(() => fireGsdKickoff(sessionId, get), GSD_KICKOFF_FALLBACK_MS);
+  pendingGsdKickoffs.set(sessionId, { command: kickoff.command, timerId });
+
+  // If the session is already in the target mode the bridge has nothing to confirm, so don't wait.
+  if ((get().remoteSessionModes[sessionId] ?? 'plan') === kickoff.mode) {
+    fireGsdKickoff(sessionId, get);
+    return;
+  }
+  void get().setMode(sessionId, kickoff.mode);
+}
+
 /** Reconcile a locally-created optimistic session into the real bridge session.
  *  Rewrites the row in place (no flicker), migrates per-session maps, moves the active
  *  selection, clears optimistic bookkeeping, and flushes any buffered first message. */
@@ -416,6 +504,11 @@ export function adoptOptimisticSession(localId: string, session: RemoteSessionIn
     };
   });
   debouncedPersistRemoteSessions(get);
+
+  // "New GSD project" (CD-058): the session only just acquired a real id, which is the first
+  // moment mode changes and input can be addressed to it. Runs before the buffered flush so the
+  // mode switch is on the wire ahead of anything the user typed while it was starting.
+  if (opt?.gsd) startGsdKickoff(session.id, opt.gsd, get);
 
   // Flush any message the user typed before the real session existed.
   if (opt && opt.bufferedMessages.length > 0) {
@@ -562,6 +655,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSessionUsage: {},
   remoteSessionGsd: {},
   gsdEnabledSessions: {},
+  gsdStartedSessions: {},
   remoteSessionContext: {},
   remoteSessionContextWindow: {},
   remoteSessionContextPercentage: {},
@@ -1108,6 +1202,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     // Opting in is the moment the user wants to see something, so fetch rather than wait for
     // the next turn boundary.
     if (enabled) void get().refreshGsd(sessionId);
+  },
+
+  markGsdStarted: (sessionId) => {
+    if (get().gsdStartedSessions[sessionId]) return;
+    set((state) => ({
+      gsdStartedSessions: { ...state.gsdStartedSessions, [sessionId]: true },
+    }));
+    void persistSet('codedeck_gsd_started', { ...get().gsdStartedSessions });
   },
 
   setRemoteSessionModeLocal: (sessionId, mode) => {
@@ -1879,6 +1981,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           remoteSessionModes: { ...state.remoteSessionModes, [sessionId]: mode },
         }));
         get().clearSettingPending(sessionId);
+        // "New GSD project" waits here: the command is only safe to send once the session has
+        // actually left plan mode (CD-058).
+        fireGsdKickoff(sessionId, get);
       },
       // onEffortConfirmed — fast feedback from bridge after effort change
       (sessionId: string, level: EffortLevel) => {
@@ -1945,6 +2050,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const savedGsdEnabled = await persistGet<Record<string, boolean>>('codedeck_gsd_enabled');
     if (savedGsdEnabled && typeof savedGsdEnabled === 'object') {
       set({ gsdEnabledSessions: savedGsdEnabled });
+    }
+    const savedGsdStarted = await persistGet<Record<string, boolean>>('codedeck_gsd_started');
+    if (savedGsdStarted && typeof savedGsdStarted === 'object') {
+      set({ gsdStartedSessions: savedGsdStarted });
     }
 
     // Restore persisted remote session metadata (titles, etc.) before connecting
@@ -2037,23 +2146,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }, 3_000);
   },
 
-  createRemoteSession: async (machine, testSession, model, cwd, createCwd) => {
+  createRemoteSession: async (machine, opts) => {
     try {
       const { default_effort: defaultEffort, model: configModel } = get().config;
       await sendCreateSessionRequest(
         machine,
         defaultEffort !== 'auto' ? defaultEffort : undefined,
-        model ?? (configModel || undefined),
-        testSession,
-        cwd,
-        createCwd,
+        opts?.model ?? (configModel || undefined),
+        opts?.testSession,
+        opts?.cwd,
+        opts?.createCwd,
       );
     } catch (e) {
       console.error('[SessionStore] Failed to create remote session:', e);
     }
   },
 
-  startOptimisticRemoteSession: (machine, testSession, model, cwd, createCwd) => {
+  startOptimisticRemoteSession: (machine, opts) => {
+    const { testSession, model, cwd, createCwd, gsd } = opts ?? {};
     const localId = crypto.randomUUID();
     const rowId = `optimistic:${localId}`;
     const { default_effort: defaultEffort, model: configModel } = get().config;
@@ -2091,6 +2201,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         testSession: !!testSession,
         cwd,
         createCwd,
+        gsd,
         bufferedMessages: [],
         timeoutId,
         status: 'starting',
@@ -2112,10 +2223,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     useUIStore.getState().setPanelMode('session');
 
     // Subtle progress line so the OutputStream isn't blank while the bridge spins up.
-    get().addOutput(rowId, { entry_type: 'system', content: 'Starting session…', timestamp: now });
+    get().addOutput(rowId, {
+      entry_type: 'system',
+      content: gsd ? 'Starting session — GSD will begin as soon as it is live…' : 'Starting session…',
+      timestamp: now,
+    });
 
     // Fire the real create over the wire — don't block the UI on it.
-    void get().createRemoteSession(machine, testSession, resolvedModel, cwd, createCwd);
+    void get().createRemoteSession(machine, { testSession, model: resolvedModel, cwd, createCwd });
   },
 
   retryOptimisticSession: (localId) => {
@@ -2136,10 +2251,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return { optimisticSessions: next, optimisticQueueByMachine: queue };
     });
     get().addOutput(`optimistic:${localId}`, { entry_type: 'system', content: 'Retrying…', timestamp: new Date().toISOString() });
-    void get().createRemoteSession(machine, opt.testSession, opt.model, opt.cwd, opt.createCwd);
+    void get().createRemoteSession(machine, {
+      testSession: opt.testSession,
+      model: opt.model,
+      cwd: opt.cwd,
+      createCwd: opt.createCwd,
+    });
   },
 
   deleteRemoteSession: (sessionId) => {
+    // A GSD command still armed for a session being deleted must not fire into the void.
+    cancelGsdKickoff(sessionId);
+
     // Cancel any previous pending delete (auto-commits it immediately)
     if (pendingDeleteTimer) {
       clearTimeout(pendingDeleteTimer);
@@ -2196,6 +2319,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const { [sessionId]: _su, ...restSessionUsage } = state.remoteSessionUsage;
       const { [sessionId]: _gsd, ...restSessionGsd } = state.remoteSessionGsd;
       const { [sessionId]: _ge, ...restGsdEnabled } = state.gsdEnabledSessions;
+      const { [sessionId]: _gs, ...restGsdStarted } = state.gsdStartedSessions;
       const { [sessionId]: _ctx, ...restContext } = state.remoteSessionContext;
       const { [sessionId]: _cw, ...restContextWindow } = state.remoteSessionContextWindow;
       const { [sessionId]: _cp, ...restContextPercentage } = state.remoteSessionContextPercentage;
@@ -2216,6 +2340,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSessionUsage: restSessionUsage,
         remoteSessionGsd: restSessionGsd,
         gsdEnabledSessions: restGsdEnabled,
+        gsdStartedSessions: restGsdStarted,
         remoteSessionContext: restContext,
         remoteSessionContextWindow: restContextWindow,
         remoteSessionContextPercentage: restContextPercentage,

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useSessionStore } from '../stores/sessionStore';
+import { useUIStore } from '../stores/uiStore';
 import GsdStageBar from '../components/GsdStageBar';
 import type { GsdPhase, GsdState } from '../types';
 
@@ -54,7 +55,9 @@ function render(sessionId = 's1'): string {
 }
 
 beforeEach(() => {
-  useSessionStore.setState({ remoteSessionGsd: {} });
+  // Reset every per-session GSD map, not just the snapshot: `gsdStartedSessions` persists across
+  // tests otherwise and silently changes what setup mode renders.
+  useSessionStore.setState({ remoteSessionGsd: {}, gsdEnabledSessions: {}, gsdStartedSessions: {} });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -162,9 +165,18 @@ describe('GsdStageBar — setup mode (per-session opt-in)', () => {
   it('shows Start once the session is opted in', () => {
     useSessionStore.setState({ remoteSessionGsd: { s1: notAProject() }, gsdEnabledSessions: { s1: true } });
     const html = render();
-    expect(html).toContain('Start GSD');
-    expect(html).toContain('Map codebase');
-    expect(html).toContain('GSD not set up here');
+    expect(html).toContain('Start GSD here');
+    expect(html).toContain('Map existing code');
+    expect(html).toContain('GSD not set up in this project');
+  });
+
+  it('says what each setup button will actually do', () => {
+    // "Map codebase" read as a mystery button in use — the tooltip has to name the outcome, not
+    // just echo the command.
+    useSessionStore.setState({ remoteSessionGsd: { s1: notAProject() }, gsdEnabledSessions: { s1: true } });
+    const html = render();
+    expect(html).toContain('.planning/codebase/');
+    expect(html).toContain('Interview → requirements → roadmap');
   });
 
   it('stays hidden when opted in but GSD is not installed on the laptop', () => {
@@ -188,7 +200,7 @@ describe('GsdStageBar — setup mode (per-session opt-in)', () => {
     });
     render();
     const btns = Array.from(container.querySelectorAll('.gsd-bar-action')) as HTMLButtonElement[];
-    act(() => { btns.find(b => b.textContent === 'Start GSD')!.click(); });
+    act(() => { btns.find(b => b.textContent === 'Start GSD here')!.click(); });
     expect(sent).toEqual(['/gsd-new-project']);
   });
 });
@@ -307,7 +319,13 @@ describe('GsdStageBar — tap guards', () => {
     expect(sent).toEqual(['/gsd-execute-phase 2']);
   });
 
-  it('disables Start GSD when the directory is not a git repo', () => {
+  /**
+   * CD-058. The original CD-056 fix rendered `Start GSD` *disabled* here — and `.gsd-bar-action`
+   * had no `:disabled` rule, so at the workspace root (not a repo) it looked live and ate every
+   * tap in silence. That is the literal "Start GSD does nothing" report. The dead end is now the
+   * route to a directory GSD *can* have.
+   */
+  it('offers a way out instead of a dead button when the directory is not a git repo', () => {
     const sent: string[] = [];
     useSessionStore.setState({
       remoteSessionGsd: { s1: notAProject({ hasGit: false }) },
@@ -315,10 +333,18 @@ describe('GsdStageBar — tap guards', () => {
       sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
     });
     const html = renderWith('idle');
-    expect(html).toContain('GSD needs a git repository');
-    const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
-    expect(start.disabled).toBe(true);
-    act(() => { start.click(); });
+    expect(html).toContain("GSD needs its own folder");
+    // No `git init` command may be offered here — that was the CD-056 hazard.
+    expect(sent).toEqual([]);
+    expect(html).not.toContain('/gsd-new-project');
+
+    const out = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
+    expect(out.disabled).toBe(false);
+    expect(out.textContent).toBe('New GSD project');
+    act(() => { out.click(); });
+    // It opens New Session already switched to the GSD flow, and still sends nothing.
+    expect(useUIStore.getState().newSessionOpen).toBe(true);
+    expect(useUIStore.getState().newSessionGsd).toBe(true);
     expect(sent).toEqual([]);
   });
 
@@ -330,7 +356,7 @@ describe('GsdStageBar — tap guards', () => {
       sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
     });
     const html = renderWith('idle');
-    expect(html).toContain('GSD not set up here');
+    expect(html).toContain('GSD not set up in this project');
     const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
     expect(start.disabled).toBe(false);
     act(() => { start.click(); });
@@ -353,13 +379,58 @@ describe('GsdStageBar — tap guards', () => {
     expect(sent).toEqual(['/gsd-new-project']);
   });
 
-  it('disables Start GSD while the session is busy even in a real repo', () => {
+  /**
+   * CD-058. GSD writes nothing under `.planning/` until its interview is well under way, so for the
+   * whole questioning stage the project still reports "not a GSD project". Offering `Start GSD here`
+   * there is offering to throw the half-finished interview away — and it reads as "continue".
+   */
+  it('does not offer a plain Start once GSD setup has already been sent here', () => {
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject({ hasGit: true }) },
+      gsdEnabledSessions: { s1: true },
+      gsdStartedSessions: { s1: true },
+    });
+    const html = renderWith('idle');
+    expect(html).toContain('GSD setup in progress');
+    expect(html).not.toContain('Start GSD here');
+    // Restarting stays possible, but only under a word that cannot be read as "continue".
+    expect(html).toContain('Restart GSD setup');
+    // Mapping an existing codebase mid-interview would fight the interview — drop it.
+    expect(html).not.toContain('Map existing code');
+  });
+
+  it('records that setup was started when the Start button is tapped', () => {
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject({ hasGit: true }) },
+      gsdEnabledSessions: { s1: true },
+      gsdStartedSessions: {},
+      sendMessage: (async () => {}) as never,
+    });
+    renderWith('idle');
+    act(() => { (container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement).click(); });
+    expect(useSessionStore.getState().gsdStartedSessions['s1']).toBe(true);
+  });
+
+  it('reports progress instead of dead buttons while GSD is setting itself up', () => {
+    // Every action here is a no-op mid-turn, and the usual reason the turn is running is the
+    // interview this strip just started. Three unresponsive buttons is the bug; a status line
+    // is the answer.
     useSessionStore.setState({
       remoteSessionGsd: { s1: notAProject({ hasGit: true }) },
       gsdEnabledSessions: { s1: true },
     });
-    renderWith('waiting_question');
-    const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
-    expect(start.disabled).toBe(true);
+    const html = renderWith('running');
+    expect(html).toContain('Setting GSD up…');
+    expect(container.querySelector('.gsd-bar-action')).toBeNull();
+  });
+
+  it('says GSD is waiting on you when the setup turn blocks on a question', () => {
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject({ hasGit: true }) },
+      gsdEnabledSessions: { s1: true },
+    });
+    const html = renderWith('waiting_question');
+    expect(html).toContain('GSD is waiting on you');
+    expect(container.querySelector('.gsd-bar-action')).toBeNull();
   });
 });

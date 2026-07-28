@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
+import { useUIStore } from '../stores/uiStore';
 import { stripSummary, recommendedAction, executionLine, recoveryChips } from '../utils/gsdStages';
 import GsdStagePanel from './GsdStagePanel';
 import '../styles/gsd.css';
@@ -26,6 +27,10 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
   const enabled = useSessionStore((s) => s.gsdEnabledSessions[sessionId]);
   const sendMessage = useSessionStore((s) => s.sendMessage);
   const refreshGsd = useSessionStore((s) => s.refreshGsd);
+  const machine = useSessionStore((s) => s.getMachineForSession(sessionId));
+  const started = useSessionStore((s) => s.gsdStartedSessions[sessionId] === true);
+  const markGsdStarted = useSessionStore((s) => s.markGsdStarted);
+  const setNewSessionOpen = useUIStore((s) => s.setNewSessionOpen);
   const [open, setOpen] = useState(false);
 
   if (!gsd) return null;
@@ -49,6 +54,13 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
     setOpen(false);
   };
 
+  /** Setup commands additionally record that GSD has been started here — see the strip below. */
+  const runSetup = (command: string) => {
+    if (busy) return;
+    markGsdStarted(sessionId);
+    run(command);
+  };
+
   // --- Setup mode: this project isn't a GSD project yet ---
   if (setupMode) {
     const start = gsd.actions.find(a => a.id === 'new-project');
@@ -58,35 +70,71 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
     // inside it. `hasGit === false` is an explicit "no" from the bridge; `undefined` means an older
     // bridge that doesn't send the field, and must not disable the button.
     const noRepo = gsd.hasGit === false;
-    const startBlocked = noRepo || busy;
-    const startTitle = noRepo
-      ? 'Not a git repository — GSD would run `git init` here'
-      : busy
-        ? 'Session is busy — wait for the current turn to finish'
-        : start?.command;
+
+    // CD-058. While a turn is in flight every action here is a no-op (see `busy` above), and the
+    // overwhelmingly common reason for that is the GSD interview this strip just started. Say so
+    // instead of rendering three buttons that ignore taps.
+    if (busy) {
+      return (
+        <div className="gsd-bar gsd-bar--setup">
+          <span className="gsd-bar-summary gsd-bar-summary--muted">
+            {sessionState === 'waiting_question' || sessionState === 'waiting_permission'
+              ? 'GSD is waiting on you'
+              : 'Setting GSD up…'}
+          </span>
+        </div>
+      );
+    }
+
+    // CD-058. `Start GSD` used to render here disabled, and `.gsd-bar-action` had no `:disabled`
+    // rule — so at the workspace root (not a repo) it looked exactly like a live button and ate
+    // every tap in silence. That was the whole "Start GSD does nothing" report. A directory GSD
+    // must not `git init` is not a disabled button, it is the wrong directory: send the user to
+    // the flow that makes a right one.
+    if (noRepo) {
+      return (
+        <div className="gsd-bar gsd-bar--setup">
+          <span className="gsd-bar-summary gsd-bar-summary--muted">
+            GSD needs its own folder — this one isn't a git repo
+          </span>
+          <button
+            className="gsd-bar-action gsd-bar-action--primary"
+            onClick={() => setNewSessionOpen(true, machine ?? null, true)}
+            title="Create a project folder and start GSD there"
+          >
+            New GSD project
+          </button>
+        </div>
+      );
+    }
+
+    // CD-058. GSD writes nothing to `.planning/` until its interview is well under way, so between
+    // "started" and "set up" the project still looks untouched. Left alone the strip keeps offering
+    // to start it, and tapping that throws the half-finished interview away and begins a new one.
+    // Say where we are, and make the restart say `Restart` so it can't be mistaken for `continue`.
     return (
       <div className="gsd-bar gsd-bar--setup">
         <span className="gsd-bar-summary gsd-bar-summary--muted">
-          {noRepo ? 'GSD needs a git repository' : 'GSD not set up here'}
+          {started ? 'GSD setup in progress — answer it below' : 'GSD not set up in this project'}
         </span>
-        {map && (
+        {map && !started && (
           <button
             className="gsd-bar-action"
-            onClick={() => run(map.command)}
-            disabled={busy}
-            title={busy ? 'Session is busy — wait for the current turn to finish' : map.command}
+            onClick={() => runSetup(map.command)}
+            title={`Analyse the existing code into .planning/codebase/ (${map.command})`}
           >
-            Map codebase
+            Map existing code
           </button>
         )}
         {start && (
           <button
             className="gsd-bar-action gsd-bar-action--primary"
-            onClick={() => run(start.command)}
-            disabled={startBlocked}
-            title={startTitle}
+            onClick={() => runSetup(start.command)}
+            title={started
+              ? `Start the interview over from scratch (${start.command})`
+              : `Interview → requirements → roadmap (${start.command})`}
           >
-            Start GSD
+            {started ? 'Restart GSD setup' : 'Start GSD here'}
           </button>
         )}
       </div>

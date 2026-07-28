@@ -78,6 +78,17 @@
   background: var(--bg-selected);
 }
 
+/* CD-058. Without this a disabled action was pixel-identical to a live one, so "Start GSD" at a
+   non-repo directory looked enabled and swallowed every tap — the original "it does nothing". */
+.gsd-bar-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gsd-bar-action:disabled:active {
+  background: var(--bg-surface);
+}
+
 /* --- Expanded sheet --- */
 
 .gsd-situation-badge {
@@ -260,6 +271,33 @@
 
 .gsd-bar-action--recovery {
   border-color: #f59e0b;
+}
+
+/* --- "Start a new GSD project" toggle in New Session (CD-058) --- */
+
+.gsd-new-toggle {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.gsd-new-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.gsd-new-toggle-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gsd-new-toggle-hint {
+  margin: 6px 0 0;
 }
 
 /* --- Recovery block in the sheet --- */

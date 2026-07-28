@@ -155,10 +155,21 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
     ? (machineProtocolVersion[remoteMachineKey] ?? 0) >= 6
     : false;
 
-  // Re-poll GSD state when the session opens AND whenever a turn ends. GSD only advances when a
-  // /gsd-* command finishes, so turn-end is exactly when the roadmap can have moved — polling more
-  // often would just burn the bridge's output budget for an unchanged snapshot.
+  // Pull a snapshot as soon as a session is opened, whatever it is doing. Gating this on
+  // `!== 'running'` (as the turn-end poll below does) meant a session opened mid-turn had no GSD
+  // state at all — and the strip renders nothing without one, so it stayed invisible for exactly
+  // as long as the work was happening. A "New GSD project" session is running from its first
+  // second, which made that the normal case rather than the edge one (CD-058).
   const remoteSessionState = remoteSession?.state;
+  useEffect(() => {
+    if (remoteSessionId && bridgeSupportsGsd) {
+      refreshGsd(remoteSessionId);
+    }
+  }, [remoteSessionId, bridgeSupportsGsd, refreshGsd]);
+
+  // Re-poll whenever a turn ends. GSD only advances when a /gsd-* command finishes, so turn-end is
+  // exactly when the roadmap can have moved — polling more often would just burn the bridge's
+  // output budget for an unchanged snapshot.
   useEffect(() => {
     if (remoteSessionId && bridgeSupportsGsd && remoteSessionState !== 'running') {
       refreshGsd(remoteSessionId);

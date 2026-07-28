@@ -1,6 +1,6 @@
 {
   "name": "codedeck",
-  "version": "2026.07.30",
+  "version": "2026.07.31",
   "private": true,
   "description": "Multi-session agentic coding interface",
   "scripts": {

@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { useSessionStore, adoptOptimisticSession, isLocalPlaceholder } from '../stores/sessionStore';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  useSessionStore,
+  adoptOptimisticSession,
+  isLocalPlaceholder,
+  fireGsdKickoff,
+  cancelGsdKickoff,
+} from '../stores/sessionStore';
+import { sanitizeProjectFolder } from '../components/NewSessionModal';
 import { OutputEntry, RemoteMachine, RemoteSessionInfo } from '../types';
 
 function makeEntry(overrides: Partial<OutputEntry> = {}): OutputEntry {
@@ -270,7 +277,7 @@ describe('sessionStore optimistic session start', () => {
   });
 
   it('opens an active, non-offline optimistic session immediately on start', () => {
-    useSessionStore.getState().startOptimisticRemoteSession(machine, false, 'claude-opus-4-8');
+    useSessionStore.getState().startOptimisticRemoteSession(machine, { model: 'claude-opus-4-8' });
 
     const state = useSessionStore.getState();
     const activeId = state.activeSessionId!;
@@ -290,7 +297,7 @@ describe('sessionStore optimistic session start', () => {
   });
 
   it('buffers a first message typed before the session is ready (no throw, echoed locally)', () => {
-    useSessionStore.getState().startOptimisticRemoteSession(machine, false, 'claude-opus-4-8');
+    useSessionStore.getState().startOptimisticRemoteSession(machine, { model: 'claude-opus-4-8' });
     const activeId = useSessionStore.getState().activeSessionId!;
     const localId = activeId.slice('optimistic:'.length);
 
@@ -307,7 +314,7 @@ describe('sessionStore optimistic session start', () => {
   });
 
   it('adopts the real session in place, migrating outputs + active selection, preserving the title', () => {
-    useSessionStore.getState().startOptimisticRemoteSession(machine, false, 'claude-opus-4-8');
+    useSessionStore.getState().startOptimisticRemoteSession(machine, { model: 'claude-opus-4-8' });
     const activeId = useSessionStore.getState().activeSessionId!;
     const localId = activeId.slice('optimistic:'.length);
     useSessionStore.getState().sendMessage(activeId, 'do the thing');
@@ -341,7 +348,7 @@ describe('sessionStore optimistic session start', () => {
   });
 
   it('retry re-arms a failed optimistic session back to starting', () => {
-    useSessionStore.getState().startOptimisticRemoteSession(machine, false, 'claude-opus-4-8');
+    useSessionStore.getState().startOptimisticRemoteSession(machine, { model: 'claude-opus-4-8' });
     const activeId = useSessionStore.getState().activeSessionId!;
     const localId = activeId.slice('optimistic:'.length);
 
@@ -359,6 +366,160 @@ describe('sessionStore optimistic session start', () => {
     const state = useSessionStore.getState();
     expect(state.optimisticSessions.get(localId)?.status).toBe('starting');
     expect(state.optimisticQueueByMachine.get(machine.pubkeyHex)).toContain(localId);
+  });
+});
+
+/**
+ * CD-058 — "Start a new GSD project" from the phone.
+ *
+ * Two ordering rules carry the whole feature, and both are invisible if you only look at the UI:
+ *
+ *  1. The command may not go out while the session is still in plan mode. GSD's workflows WRITE —
+ *     in plan mode Claude Code plans them instead of running them, which looks identical to the
+ *     button doing nothing. So the mode change goes first and the command waits for its confirm.
+ *  2. The strip must be opted in the moment the session exists, not when `.planning/` appears —
+ *     otherwise it is hidden for the entire interview, i.e. exactly when it is wanted.
+ */
+describe('sessionStore — GSD project kickoff', () => {
+  const machine = {
+    hostname: 'testbox',
+    pubkeyHex: 'machinepubkey',
+    relays: [],
+    connected: true,
+  } as unknown as RemoteMachine;
+
+  const realSession = (id = 'real-gsd-1'): RemoteSessionInfo => ({
+    id,
+    slug: 'session-real',
+    cwd: '/ws/my-app',
+    lastActivity: new Date().toISOString(),
+    lineCount: 0,
+    title: null,
+    project: 'my-app',
+  });
+
+  let sent: Array<[string, string]>;
+  let modes: Array<[string, string]>;
+
+  beforeEach(() => {
+    sent = [];
+    modes = [];
+    useSessionStore.setState({
+      machines: [machine],
+      remoteSessions: {},
+      outputs: {},
+      activeSessionId: null,
+      optimisticSessions: new Map(),
+      optimisticQueueByMachine: new Map(),
+      remoteSessionModes: {},
+      gsdEnabledSessions: {},
+      sessionReadyTimestamps: new Map(),
+      unreadSessions: new Set(),
+      sendMessage: (async (id: string, text: string) => { sent.push([id, text]); }) as never,
+      setMode: (async (id: string, mode: string) => { modes.push([id, mode]); }) as never,
+      setGsdEnabled: ((id: string, on: boolean) => {
+        useSessionStore.setState((s) => ({ gsdEnabledSessions: { ...s.gsdEnabledSessions, [id]: on } }));
+      }) as never,
+    });
+  });
+
+  afterEach(() => {
+    for (const opt of useSessionStore.getState().optimisticSessions.values()) clearTimeout(opt.timeoutId);
+    cancelGsdKickoff('real-gsd-1');
+  });
+
+  function startGsdSession() {
+    useSessionStore.getState().startOptimisticRemoteSession(machine, {
+      cwd: 'my-app',
+      createCwd: true,
+      gsd: { command: '/gsd-new-project', mode: 'default' },
+    });
+    const activeId = useSessionStore.getState().activeSessionId!;
+    return activeId.slice('optimistic:'.length);
+  }
+
+  it('switches mode first and holds the command until the bridge confirms', () => {
+    const localId = startGsdSession();
+    adoptOptimisticSession(localId, realSession(), useSessionStore.setState, useSessionStore.getState);
+
+    // Mode requested, command NOT yet sent — this ordering is the whole fix.
+    expect(modes).toEqual([['real-gsd-1', 'default']]);
+    expect(sent).toEqual([]);
+
+    // The strip is already opted in, so it is visible during the interview rather than after it.
+    expect(useSessionStore.getState().gsdEnabledSessions['real-gsd-1']).toBe(true);
+
+    fireGsdKickoff('real-gsd-1', useSessionStore.getState);
+    expect(sent).toEqual([['real-gsd-1', '/gsd-new-project']]);
+  });
+
+  it('sends the command only once, even if mode-confirmed arrives twice', () => {
+    const localId = startGsdSession();
+    adoptOptimisticSession(localId, realSession(), useSessionStore.setState, useSessionStore.getState);
+    fireGsdKickoff('real-gsd-1', useSessionStore.getState);
+    fireGsdKickoff('real-gsd-1', useSessionStore.getState);
+    expect(sent).toEqual([['real-gsd-1', '/gsd-new-project']]);
+  });
+
+  it('sends immediately when the session is already in the target mode', () => {
+    // Nothing will confirm a mode change that isn't needed, so waiting for one would hang forever.
+    useSessionStore.setState({ remoteSessionModes: { 'real-gsd-1': 'default' } });
+    const localId = startGsdSession();
+    adoptOptimisticSession(localId, realSession(), useSessionStore.setState, useSessionStore.getState);
+    expect(modes).toEqual([]);
+    expect(sent).toEqual([['real-gsd-1', '/gsd-new-project']]);
+  });
+
+  it('falls back to sending after the timeout when no confirm ever arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const localId = startGsdSession();
+      adoptOptimisticSession(localId, realSession(), useSessionStore.setState, useSessionStore.getState);
+      expect(sent).toEqual([]);
+      // An older bridge, or a control request that failed, must not swallow the feature silently.
+      vi.advanceTimersByTime(6_500);
+      expect(sent).toEqual([['real-gsd-1', '/gsd-new-project']]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fire a kickoff armed for a session that was deleted', () => {
+    const localId = startGsdSession();
+    adoptOptimisticSession(localId, realSession(), useSessionStore.setState, useSessionStore.getState);
+    useSessionStore.getState().deleteRemoteSession('real-gsd-1');
+    fireGsdKickoff('real-gsd-1', useSessionStore.getState);
+    expect(sent).toEqual([]);
+  });
+
+  it('leaves ordinary sessions completely alone', () => {
+    useSessionStore.getState().startOptimisticRemoteSession(machine, { model: 'claude-opus-4-8' });
+    const activeId = useSessionStore.getState().activeSessionId!;
+    adoptOptimisticSession(activeId.slice('optimistic:'.length), realSession('plain-1'), useSessionStore.setState, useSessionStore.getState);
+    expect(modes).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(useSessionStore.getState().gsdEnabledSessions['plain-1']).toBeUndefined();
+  });
+});
+
+describe('sanitizeProjectFolder', () => {
+  it('turns a typed project name into a single safe folder segment', () => {
+    expect(sanitizeProjectFolder('  My New App  ')).toBe('My-New-App');
+    expect(sanitizeProjectFolder('a/b/c')).toBe('a-b-c');
+  });
+
+  it('refuses traversal and dotfiles rather than handing them to the bridge', () => {
+    // The bridge confines cwd to the workspace root anyway, but a name that *looks* like an escape
+    // should never leave the phone — it would silently fall back to the root and root the session
+    // in the wrong place, which is the failure this whole feature exists to avoid.
+    expect(sanitizeProjectFolder('../../etc')).toBe('etc');
+    expect(sanitizeProjectFolder('.hidden')).toBe('hidden');
+    expect(sanitizeProjectFolder('...')).toBe('');
+    expect(sanitizeProjectFolder('   ')).toBe('');
+  });
+
+  it('drops characters a shell or path would treat specially', () => {
+    expect(sanitizeProjectFolder('rm -rf $HOME; echo')).toBe('rm--rf-HOME-echo');
   });
 });
 

@@ -1,5 +1,43 @@
 # Done — Codedeck
 
+## GSD from the phone — device-verified (2026-07-28)
+
+Evidence for everything in this section: `docs/CD-058-GSD-DEVICE-VERIFY-RESULTS.md` (Pixel 9 Pro
+Fold `48101FDKD000MW`, CodeDeck `2026.7.31`, bridge `2026.7.30` / protocol v8, GSD Core 1.8.0).
+A full `/gsd-new-project` run was driven from the phone end to end: folder created and `git init`ed,
+session rooted in it, mode switched, command sent, ~10 question groups answered by tapping, GSD
+wrote `.planning/` and committed `f05e34a`, and the strip flipped itself to `v1.0 · Plan first
+phase · 0%` with **Discuss the first phase** as a tappable chip.
+
+- [x] **CD-052: GSD stage strip under the session header** — device-verified. The strip renders for
+  a remote session in both of its shapes: setup mode on a project with no `.planning/`, and the
+  real milestone/situation/percent readout once GSD had written one. Re-polls on session open and
+  on turn end (the open-poll no longer waits for the turn to end — a session that is running from
+  its first second, which "New GSD project" always is, used to render nothing at all until it
+  went idle).
+- [x] **CD-055: strip actions are silently dropped when the session is busy** — device-verified.
+  Mid-turn the strip renders **no** action buttons at all rather than buttons that swallow taps:
+  observed as *"GSD is waiting on you"* while the interview was blocked on a question, and
+  *"Setting GSD up…"* while a turn was in flight. **Pre-fix the tap posted the command into the
+  stream and the agent never acted on it** — it looked sent.
+- [x] **CD-056: `Start GSD` is offered where GSD would do real damage** — device-verified, and the
+  original symptom reproduced first on `2026.7.30`: at the workspace root the button was disabled
+  (correctly — `has_git: false`) but styled exactly like an enabled one, so it looked live and ate
+  every tap. `git init` there would have run over **27 sibling repos**. That screen now reads
+  *"GSD needs its own folder — this one isn't a git repo"* with a live **New GSD project** button
+  that opens the flow which makes a directory GSD may safely have. (See CD-058.)
+- [x] **CD-057: start a new GSD project from the phone** — device-verified. `<workspace>/
+  gsd-phone-demo` was created and `git init`ed by the bridge from a phone tap, the session was
+  rooted there (header read `gsd-phone-demo`, not `Workspace`), and GSD saw only that project.
+- [x] **CDB-031 / CDB-032: serve GSD workflow state to the phone (`gsd-request` / `gsd-state`)** —
+  device-verified for the snapshot itself: the strip was populated from the live bridge throughout,
+  including the transition from `available: false` to a real GSD project mid-session. The
+  live-execution reconstruction those tickets also added is still owed — see CD-053 in TODO.md.
+- [x] **CDB-033: a session can only ever be rooted at `workspaceFolders[0]`** — device-verified via
+  CD-057 above: `create-session.cwd` + `createCwd` produced a session rooted in a brand-new
+  subdirectory, which is the whole precondition for GSD being usable in a multi-project workspace.
+
+
 ## Zapstore release 2026.07.30 — start a new GSD project from the phone (2026-07-28)
 
 - [x] **Published CodeDeck `2026.7.30` to Zapstore** — ships **CD-057** (Project folder field + "create it if it doesn't exist" checkbox), **CD-054** (real phase count), **CD-055** (busy-tap guard) and **CD-056** (`has_git` gate on Start GSD), on top of bridge **CDB-033 / protocol v8**. versionCode `20260730`, cert `c5d0cba4…fbc5`. **Two days ahead of the wall clock, deliberately** — `2026.7.29` was published earlier the same day and `2026.7.28` the day before; YYYYMMDD versionCodes must stay monotonic and calendar versioning has no intra-day slot, so the version runs ahead rather than using a suffix that would sort above every future date. Signer proven **before** publishing (`zsp publish -q --offline` → all three events `f07e0b1af066b483…c367`, the listing owner; a mismatch forks the listing instead of updating it). The `--offline` run without `-q` fails at a TTY prompt in a non-interactive shell — `-q` is required, not optional. Events landed `2026-07-28T19:03:01Z`; CDN blob `8d2933d5…18d9a` fetched back and `cmp`-verified byte-identical; kind-3063 carries the matching `x` / `version_code` / cert. `zapstore.yaml` temp-injection reverted. Tag `codedeck-v2026.07.30`. **Note the APK is arm64-v8a only** (`dev.sh android-build` targets aarch64), tagged `f: android-arm64-v8a` in the event — same as prior releases. Companion bridge bumped to `2026.7.30`; **the VSIX is still unpublished, so users need a bridge built from source for the new capability**. (commit `5e65cdb`, 2026-07-28)
