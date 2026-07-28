@@ -30,6 +30,7 @@ src-tauri/gen/android/app/build/
 
 # Zapstore publishing secrets (bunker URL with single-use secret) — NEVER commit
 .env.zapstore
+.env.zapstore.*
 *.p12
 
 # Release APKs
