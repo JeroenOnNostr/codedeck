@@ -400,8 +400,9 @@ export async function sendCreateSessionRequest(
   model?: string,
   testSession?: boolean,
   cwd?: string,
+  createCwd?: boolean,
 ): Promise<void> {
-  const msg: BridgeOutboundMessage = { type: 'create-session', defaultEffort, model, testSession, cwd };
+  const msg: BridgeOutboundMessage = { type: 'create-session', defaultEffort, model, testSession, cwd, createCwd };
   await publishToMachine(machine, msg);
 }
 

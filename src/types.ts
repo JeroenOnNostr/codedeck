@@ -293,7 +293,7 @@ export type BridgeOutboundMessage =
   | { type: 'history-request'; sessionId: string; afterSeq?: number }
   /** `cwd`: optional project subdirectory (relative to the workspace root) to root the session in.
    *  Omitted = the workspace root, i.e. the pre-CDB-033 behaviour. Bridge validates it. */
-  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string; testSession?: boolean; cwd?: string }
+  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string; testSession?: boolean; cwd?: string; createCwd?: boolean }
   | { type: 'refresh-sessions' }
   | { type: 'interrupt'; sessionId: string }
   | { type: 'close-session'; sessionId: string }

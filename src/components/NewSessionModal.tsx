@@ -22,6 +22,9 @@ export default function NewSessionModal() {
   const [model, setModel] = useState<string>(defaultModel || DEFAULT_MODEL);
   // CDB-033. Empty = the workspace root, which is what every session used to get unconditionally.
   const [projectDir, setProjectDir] = useState('');
+  // When the folder doesn't exist yet, the bridge creates and `git init`s it — that is what makes
+  // "start a new GSD project from the phone" possible rather than only opening existing ones.
+  const [createDir, setCreateDir] = useState(false);
 
   const close = () => setNewSessionOpen(false);
 
@@ -41,9 +44,13 @@ export default function NewSessionModal() {
     const handleRemoteCreate = () => {
       // Open a usable session view instantly; the real session reconciles in the
       // background and any first message typed now is flushed once it's ready.
-      startOptimisticRemoteSession(machine, testSession, model, projectDir.trim() || undefined);
+      const dir = projectDir.trim();
+      startOptimisticRemoteSession(machine, testSession, model, dir || undefined, dir ? createDir : false);
       close();
     };
+
+    // Only meaningful once a folder is named, and only offered if the bridge can honour it.
+    const isNewProject = supportsProjectDir && projectDir.trim().length > 0;
 
     return (
       <div className="modal-overlay bottom-sheet" onClick={close}>
@@ -81,6 +88,12 @@ export default function NewSessionModal() {
               <datalist id="project-dirs">
                 {projects.map((p) => <option key={p} value={p} />)}
               </datalist>
+              {isNewProject && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={createDir} onChange={(e) => setCreateDir(e.target.checked)} />
+                  Create it if it doesn't exist (new git repo)
+                </label>
+              )}
             </>
           )}
           <p className="modal-hint" style={{ marginBottom: 24 }}>
