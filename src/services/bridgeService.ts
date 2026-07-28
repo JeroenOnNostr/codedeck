@@ -47,6 +47,7 @@ type ModeConfirmedHandler = (sessionId: string, mode: import('../types').AgentMo
 type EffortConfirmedHandler = (sessionId: string, level: import('../types').EffortLevel) => void;
 type ModelConfirmedHandler = (sessionId: string, model: string) => void;
 type UsageHandler = (sessionId: string, usage: import('../types').UsageData) => void;
+type GsdStateHandler = (sessionId: string, gsd: import('../types').GsdState) => void;
 type CredentialsAckHandler = (machine: string, success: boolean, hasAnthropicKey: boolean, hasGithubPat: boolean, keyValid?: boolean, error?: string) => void;
 type PairAckHandler = (machine: string, ok: boolean, reason?: string) => void;
 
@@ -68,6 +69,7 @@ let onModeConfirmed: ModeConfirmedHandler | null = null;
 let onEffortConfirmed: EffortConfirmedHandler | null = null;
 let onModelConfirmed: ModelConfirmedHandler | null = null;
 let onUsage: UsageHandler | null = null;
+let onGsdState: GsdStateHandler | null = null;
 let onCredentialsAck: CredentialsAckHandler | null = null;
 let onPairAck: PairAckHandler | null = null;
 
@@ -132,6 +134,7 @@ export function setBridgeHandlers(
   credentialsAckHandler?: CredentialsAckHandler,
   pairAckHandler?: PairAckHandler,
   usageHandler?: UsageHandler,
+  gsdStateHandler?: GsdStateHandler,
 ): void {
   onSessionList = sessionListHandler;
   onOutput = outputHandler;
@@ -147,6 +150,7 @@ export function setBridgeHandlers(
   onEffortConfirmed = effortConfirmedHandler ?? null;
   onModelConfirmed = modelConfirmedHandler ?? null;
   onUsage = usageHandler ?? null;
+  onGsdState = gsdStateHandler ?? null;
   onCredentialsAck = credentialsAckHandler ?? null;
   onPairAck = pairAckHandler ?? null;
 }
@@ -370,6 +374,19 @@ export async function sendUsageRequest(
   sessionId: string,
 ): Promise<void> {
   const msg: BridgeOutboundMessage = { type: 'usage-request', sessionId };
+  await publishToMachine(machine, msg);
+}
+
+/**
+ * Request a fresh GSD workflow snapshot for a session. The bridge responds (protocol v6+) with a
+ * `gsd-state` message handled by onGsdState — including `available: false` when the session's cwd
+ * isn't a GSD project, which is how the phone learns to hide the strip.
+ */
+export async function sendGsdRequest(
+  machine: RemoteMachine,
+  sessionId: string,
+): Promise<void> {
+  const msg: BridgeOutboundMessage = { type: 'gsd-request', sessionId };
   await publishToMachine(machine, msg);
 }
 
@@ -660,6 +677,9 @@ function handleBridgeEvent(event: { pubkey: string; content: string; created_at:
         break;
       case 'usage':
         onUsage?.(msg.sessionId, msg.usage);
+        break;
+      case 'gsd-state':
+        onGsdState?.(msg.sessionId, msg.gsd);
         break;
       case 'credentials-ack':
         onCredentialsAck?.(msg.machine, msg.success, msg.hasAnthropicKey, msg.hasGithubPat, msg.keyValid, msg.error);

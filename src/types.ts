@@ -185,6 +185,51 @@ export interface UsageData {
   fetchedAt: string;
 }
 
+// --- GSD workflow state ---
+
+/**
+ * One roadmap phase. `diskStatus` is GSD's own vocabulary, mapped to the Discuss/Plan/Execute
+ * stage triple by `gsdStages.ts`:
+ *   complete | executed | partial | planned | discussed | researched | empty | no_directory
+ */
+export interface GsdPhase {
+  number: string;
+  name: string;
+  diskStatus: string;
+  plans: number;
+  summaries: number;
+  /** GSD's `is_active`: a file in the phase dir changed <5 min ago. NOT agent liveness. */
+  recentlyTouched: boolean;
+  /** Per-phase next step, e.g. 'execute' — null when GSD recommends nothing for this phase. */
+  action: string | null;
+  /** Ready-to-send slash command for that step, e.g. '/gsd-execute-phase 2'. */
+  command: string | null;
+}
+
+/** A workflow-level action the phone fires by sending `command` as ordinary session input. */
+export interface GsdAction {
+  id: string;
+  label: string;
+  command: string;
+  recommended: boolean;
+}
+
+/** Snapshot of a session's GSD position. `available: false` → render nothing at all. */
+export interface GsdState {
+  available: boolean;
+  /** no-project | needs-first-phase | planning | executing | verify-pending | … */
+  situation: string;
+  summary: string;
+  milestone: string | null;
+  currentPhase: string | null;
+  totalPhases: number | null;
+  percent: number;
+  phases: GsdPhase[];
+  actions: GsdAction[];
+  /** id of the recommended entry in `actions`. */
+  recommended: string | null;
+}
+
 export type BridgeInboundMessage =
   | { type: 'sessions'; machine: string; sessions: RemoteSessionInfo[]; authStatus?: AuthStatus; protocolVersion?: number }
   | { type: 'output'; sessionId: string; seq: number; entry: RemoteOutputEntry }
@@ -199,6 +244,7 @@ export type BridgeInboundMessage =
   | { type: 'effort-confirmed'; sessionId: string; level: EffortLevel }
   | { type: 'model-confirmed'; sessionId: string; model: string }
   | { type: 'usage'; sessionId: string; usage: UsageData }
+  | { type: 'gsd-state'; sessionId: string; gsd: GsdState }
   | { type: 'credentials-ack'; machine: string; success: boolean; hasAnthropicKey: boolean; hasGithubPat: boolean; keyValid?: boolean; error?: string }
   | { type: 'pair-ack'; machine: string; ok: boolean; reason?: string };
 
@@ -211,6 +257,7 @@ export type BridgeOutboundMessage =
   | { type: 'effort'; sessionId: string; level: EffortLevel }
   | { type: 'model'; sessionId: string; model: string }
   | { type: 'usage-request'; sessionId: string }
+  | { type: 'gsd-request'; sessionId: string }
   | { type: 'history-request'; sessionId: string; afterSeq?: number }
   | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string; testSession?: boolean }
   | { type: 'refresh-sessions' }

@@ -12,6 +12,7 @@ import SessionHeader from './SessionHeader';
 import OutputStream from './OutputStream';
 import PermissionBar from './PermissionBar';
 import RemotePermissionBar from './RemotePermissionBar';
+import GsdStageBar from './GsdStageBar';
 import InputBar from './InputBar';
 import DmConversationView from './DmConversationView';
 import ErrorBoundary from './ErrorBoundary';
@@ -39,6 +40,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const requestSessionHistory = useSessionStore((s) => s.requestSessionHistory);
   const refreshUsage = useSessionStore((s) => s.refreshUsage);
+  const refreshGsd = useSessionStore((s) => s.refreshGsd);
   const setPanelMode = useUIStore((s) => s.setPanelMode);
   const retryOptimisticSession = useSessionStore((s) => s.retryOptimisticSession);
   // Reactive status of the active optimistic session, if any (drives the retry banner).
@@ -147,6 +149,22 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
     }
   }, [remoteSessionId, bridgeSupportsUsage, refreshUsage]);
 
+  // GSD stage snapshots are a protocol v6+ feature. Older bridges never answer, so the strip
+  // simply never appears.
+  const bridgeSupportsGsd = remoteMachineKey
+    ? (machineProtocolVersion[remoteMachineKey] ?? 0) >= 6
+    : false;
+
+  // Re-poll GSD state when the session opens AND whenever a turn ends. GSD only advances when a
+  // /gsd-* command finishes, so turn-end is exactly when the roadmap can have moved — polling more
+  // often would just burn the bridge's output budget for an unchanged snapshot.
+  const remoteSessionState = remoteSession?.state;
+  useEffect(() => {
+    if (remoteSessionId && bridgeSupportsGsd && remoteSessionState !== 'running') {
+      refreshGsd(remoteSessionId);
+    }
+  }, [remoteSessionId, bridgeSupportsGsd, remoteSessionState, refreshGsd]);
+
   return (
     <div
       {...touchHandlers}
@@ -181,6 +199,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
             ) : panelMode === 'session' && remoteSession ? (
               <>
                 <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
+                <GsdStageBar sessionId={remoteSession.id} />
                 <OutputStream sessionId={remoteSession.id} />
               </>
             ) : (

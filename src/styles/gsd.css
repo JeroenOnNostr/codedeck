@@ -1,0 +1,233 @@
+/* GSD stage strip + sheet.
+   Monochrome to match the rest of the app; the only colour is the "done" green, which uses the
+   inline-fallback form because --status-success isn't defined in global.css:root. */
+
+/* --- Collapsed strip (under SessionHeader) --- */
+
+.gsd-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+}
+
+.gsd-bar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gsd-bar-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.gsd-bar-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Thin meter — same visual weight as the usage bar, sized to survive a narrow phone. */
+.gsd-bar-meter {
+  flex-shrink: 0;
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.gsd-bar-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--text-secondary);
+}
+
+.gsd-bar-action {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-medium);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gsd-bar-action:active {
+  background: var(--bg-selected);
+}
+
+/* --- Expanded sheet --- */
+
+.gsd-situation-badge {
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.gsd-summary {
+  padding: 4px 0 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.gsd-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.gsd-meter-fill {
+  height: 100%;
+  background: var(--text-secondary);
+}
+
+.gsd-meter-caption {
+  padding: 6px 0 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.gsd-phases-head,
+.gsd-actions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.gsd-stage-key {
+  font-family: var(--font-mono);
+}
+
+.gsd-phase-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  margin: 2px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Untappable phases (nothing recommended) stay readable — they're status, not dead buttons. */
+.gsd-phase-row:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.gsd-phase-row--current {
+  border-color: var(--border-strong);
+}
+
+.gsd-phase-row:not(:disabled):active {
+  background: var(--bg-selected);
+}
+
+.gsd-phase-num {
+  flex-shrink: 0;
+  width: 24px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.gsd-phase-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gsd-phase-status {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.gsd-phase-marks {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.gsd-mark--done { color: var(--status-success, #22c55e); }
+.gsd-mark--active { color: var(--text-primary); }
+.gsd-mark--ready { color: var(--text-secondary); }
+.gsd-mark--todo { color: var(--text-dim); }
+
+.gsd-action-row {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 8px;
+  margin: 2px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.gsd-action-row--recommended {
+  border-color: var(--border-strong);
+}
+
+.gsd-action-row:active {
+  background: var(--bg-selected);
+}
+
+.gsd-action-cmd {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

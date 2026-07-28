@@ -1,5 +1,35 @@
 # TODO — Codedeck
 
+## GSD integration
+
+- [x] **CD-052: GSD stage strip under the session header** — ✅ code + tests done, device-verify owed.
+  Collapsible one-line strip (`GsdStageBar.tsx`) showing milestone · phase N/M · situation · %, with a
+  tappable chip that sends the next `/gsd-*` command; expands to a bottom sheet (`GsdStagePanel.tsx`)
+  listing every phase with GSD's own Discuss/Plan/Execute marks (`utils/gsdStages.ts`) and the
+  recommended actions. Fed by the bridge's `gsd-state` message (**CDB-031**), gated on protocol v6, and
+  hidden entirely for non-GSD sessions. Re-polls on session open and on turn end.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Phone build from this commit (`./dev.sh android-build`, `--target aarch64`),
+  installed over the mesh. Laptop running the bridge build that includes CDB-031 (protocol v6) —
+  an older bridge means the strip correctly never appears, which would be a false negative here.
+  A GSD project to point at: `cp -r ../codedeck-bridge-vscode/src/__tests__/fixtures/gsd-project /tmp/gsd-verify`.
+
+  **Steps.** See the CDB-031 run-sheet in `codedeck-bridge-vscode/TODO.md` — same six steps, driven
+  from the phone. Additionally, on the phone specifically:
+  7. With the strip visible, open the keyboard and type a message.
+  8. Rotate / check on the smallest supported screen.
+
+  **Pass oracle.** Steps 1-6 as in CDB-031, plus:
+  - Step 7: the strip does **not** push the input bar off-screen and does not fight
+    `--keyboard-offset`; the output stream shrinks instead.
+  - Step 8: the summary line ellipsizes rather than wrapping to two lines or overflowing.
+  - Tapping the chip must feel like typing the command — the command text appears in the stream.
+    **Pre-fix behaviour: the only way to run a GSD command from the phone was typing it in full on
+    the touch keyboard**, and nothing on screen said which phase you were on.
+  </details>
+
 ## Bugs
 
 - [ ] **CD-001: processGiftWrap swallows exceptions silently** — `nostrService.ts:169` — NIP-17 gift-wrap decryption failures return `null` with minimal logging, making DM debugging hard. Added `console.warn` but could surface to UI.

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Session, OutputEntry, AppConfig, AgentMode, EffortLevel, TokenUsage, RemoteMachine, RemoteSessionInfo, RemoteOutputEntry, UsageData } from '../types';
+import { Session, OutputEntry, AppConfig, AgentMode, EffortLevel, TokenUsage, RemoteMachine, RemoteSessionInfo, RemoteOutputEntry, UsageData, GsdState } from '../types';
 import { api, events, isTauri } from '../ipc/tauri';
 import {
   initBridge,
@@ -20,6 +20,7 @@ import {
   sendRemoteEffortChange,
   sendRemoteModelChange,
   sendUsageRequest,
+  sendGsdRequest,
   sendInterrupt,
   sendPairRequest,
 } from '../services/bridgeService';
@@ -65,6 +66,9 @@ interface SessionStore {
    *  Keyed by sessionId. `prev` is the last confirmed value, restored if no confirm arrives. */
   remoteSettingPending: Record<string, { kind: 'mode' | 'effort' | 'model'; prev: AgentMode | EffortLevel | string }>;
   remoteSessionUsage: Record<string, UsageData>; // keyed by sessionId — subscription usage snapshot
+  /** GSD workflow snapshot per sessionId. Absent, or `available: false`, means the session's
+   *  cwd isn't a GSD project (or the bridge predates protocol v6) — the stage strip stays hidden. */
+  remoteSessionGsd: Record<string, GsdState>;
   /** Latest-turn context-window occupancy in tokens, keyed by sessionId. This is a SNAPSHOT
    *  (input + cache_read + cache_creation of the most recent turn), NOT a cumulative sum — it
    *  falls after /compact. Divided by the model's max context to show a context-usage %. */
@@ -120,6 +124,7 @@ interface SessionStore {
   /** Clear the in-flight marker for a session (called when a *-confirmed arrives). */
   clearSettingPending: (sessionId: string) => void;
   refreshUsage: (sessionId: string) => Promise<void>;
+  refreshGsd: (sessionId: string) => Promise<void>;
   setRemoteSessionModeLocal: (sessionId: string, mode: AgentMode) => void;
   updateConfig: (config: AppConfig) => Promise<void>;
   initEventListeners: () => Promise<void>;
@@ -545,6 +550,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSessionModel: {},
   remoteSettingPending: {},
   remoteSessionUsage: {},
+  remoteSessionGsd: {},
   remoteSessionContext: {},
   remoteSessionContextWindow: {},
   remoteSessionContextPercentage: {},
@@ -1070,6 +1076,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await sendUsageRequest(machine, sessionId);
     } catch (e) {
       console.error('[SessionStore] Failed to send usage request:', e);
+    }
+  },
+
+  refreshGsd: async (sessionId) => {
+    const machine = get().getMachineForSession(sessionId);
+    if (!machine) { return; }
+    try {
+      await sendGsdRequest(machine, sessionId);
+    } catch (e) {
+      console.error('[SessionStore] Failed to send GSD request:', e);
     }
   },
 
@@ -1896,6 +1912,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           remoteSessionUsage: { ...state.remoteSessionUsage, [sessionId]: usage },
         }));
       },
+      // onGsdState — GSD workflow snapshot. Stored even when `available: false`, so a session
+      // that moves off a GSD project retires its strip instead of showing a stale one.
+      (sessionId: string, gsd: GsdState) => {
+        set((state) => ({
+          remoteSessionGsd: { ...state.remoteSessionGsd, [sessionId]: gsd },
+        }));
+      },
     );
 
     // Restore persisted remote session metadata (titles, etc.) before connecting
@@ -2141,6 +2164,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const { [sessionId]: _mo, ...restModel } = state.remoteSessionModel;
       const { [sessionId]: _p, ...restPending } = state.remoteSettingPending;
       const { [sessionId]: _su, ...restSessionUsage } = state.remoteSessionUsage;
+      const { [sessionId]: _gsd, ...restSessionGsd } = state.remoteSessionGsd;
       const { [sessionId]: _ctx, ...restContext } = state.remoteSessionContext;
       const { [sessionId]: _cw, ...restContextWindow } = state.remoteSessionContextWindow;
       const { [sessionId]: _cp, ...restContextPercentage } = state.remoteSessionContextPercentage;
@@ -2159,6 +2183,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSessionModel: restModel,
         remoteSettingPending: restPending,
         remoteSessionUsage: restSessionUsage,
+        remoteSessionGsd: restSessionGsd,
         remoteSessionContext: restContext,
         remoteSessionContextWindow: restContextWindow,
         remoteSessionContextPercentage: restContextPercentage,
