@@ -199,7 +199,7 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
             ) : panelMode === 'session' && remoteSession ? (
               <>
                 <SessionHeader remoteSession={remoteSession} isWide={isWide} bridgeSupportsUsage={bridgeSupportsUsage} />
-                <GsdStageBar sessionId={remoteSession.id} />
+                <GsdStageBar sessionId={remoteSession.id} sessionState={remoteSession.state} />
                 <OutputStream sessionId={remoteSession.id} />
               </>
             ) : (

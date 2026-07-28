@@ -4,6 +4,7 @@ import type { GsdState } from '../types';
 
 function gsd(overrides: Partial<GsdState> = {}): GsdState {
   return {
+    installed: true,
     available: true,
     situation: 'executing',
     summary: 'Executing phase 2',
@@ -14,6 +15,10 @@ function gsd(overrides: Partial<GsdState> = {}): GsdState {
     phases: [],
     actions: [],
     recommended: null,
+    paused: false,
+    blockers: [],
+    verifyFailed: false,
+    execution: null,
     ...overrides,
   };
 }

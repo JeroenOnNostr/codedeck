@@ -231,3 +231,50 @@
   font-family: var(--font-mono);
   font-size: 11px;
 }
+
+/* --- State variants on the collapsed strip --- */
+
+/* Blocked beats everything: a missed checkpoint is what silently stalls a whole phase. */
+.gsd-bar--waiting {
+  border-bottom-color: var(--border-strong);
+}
+.gsd-bar--waiting .gsd-bar-chevron,
+.gsd-bar--waiting .gsd-bar-summary {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.gsd-bar--running .gsd-bar-chevron {
+  color: var(--text-primary);
+}
+
+/* Setup mode — deliberately quiet; it only appears on sessions you opted in. */
+.gsd-bar-summary--muted {
+  color: var(--text-muted);
+}
+
+.gsd-bar-action--primary {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.gsd-bar-action--recovery {
+  border-color: #f59e0b;
+}
+
+/* --- Recovery block in the sheet --- */
+
+.gsd-recovery {
+  padding-bottom: 8px;
+}
+
+.gsd-action-row--recovery {
+  border-color: #f59e0b;
+}
+
+.gsd-blocker {
+  padding: 6px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

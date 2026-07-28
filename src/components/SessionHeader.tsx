@@ -86,6 +86,9 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
   // Authoritative context-usage % the bridge read straight from the SDK (protocol v5+) — the same
   // meter the Claude Code terminal shows. Preferred over computing tokens/window ourselves.
   const liveContextPercentage = useSessionStore((s) => sessionId ? s.remoteSessionContextPercentage[sessionId] : undefined);
+  const remoteGsd = useSessionStore((s) => sessionId ? s.remoteSessionGsd[sessionId] : undefined);
+  const gsdEnabled = useSessionStore((s) => sessionId ? s.gsdEnabledSessions[sessionId] === true : false);
+  const setGsdEnabled = useSessionStore((s) => s.setGsdEnabled);
   const configModel = useSessionStore((s) => s.config.model);
   const voiceEnabled = useVoiceModeStore((s) => s.enabled);
   const setVoiceEnabled = useVoiceModeStore((s) => s.setEnabled);
@@ -173,6 +176,21 @@ export default function SessionHeader({ session, remoteSession, isWide, bridgeSu
           </button>
           {overflowOpen && (
             <div className="header-overflow-menu" role="menu">
+              {/* GSD is opt-in PER SESSION: a project that already has .planning/ shows the strip
+                  on its own, so this only matters for turning a fresh project into a GSD one. */}
+              {remoteGsd?.installed && !remoteGsd.available && (
+                <button
+                  className="header-overflow-item"
+                  role="menuitem"
+                  onClick={() => { setGsdEnabled(remoteSession.id, !gsdEnabled); setOverflowOpen(false); }}
+                  title="Show GSD setup actions for this session"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M4 5h16v2H4V5zm0 6h10v2H4v-2zm0 6h16v2H4v-2z"/>
+                  </svg>
+                  <span>{gsdEnabled ? 'Hide GSD setup' : 'Enable GSD for this session'}</span>
+                </button>
+              )}
               <button
                 className="header-overflow-item"
                 role="menuitem"

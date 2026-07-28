@@ -204,6 +204,21 @@ export interface GsdPhase {
   action: string | null;
   /** Ready-to-send slash command for that step, e.g. '/gsd-execute-phase 2'. */
   command: string | null;
+  /** Total plans in the phase. null = GSD wasn't asked (nothing to execute here). */
+  planCount: number | null;
+  /** Plans that will BLOCK on a human — the pre-flight cost of tapping this. null = not computed. */
+  needsYou: number | null;
+}
+
+/** Live progress inside a running phase, reconstructed from GSD's atomic task commits. */
+export interface GsdExecution {
+  phase: string;
+  plansTotal: number;
+  plansDone: number;
+  currentPlan: string | null;
+  tasksDone: number;
+  tasksTotal: number | null;
+  lastTask: string | null;
 }
 
 /** A workflow-level action the phone fires by sending `command` as ordinary session input. */
@@ -214,8 +229,12 @@ export interface GsdAction {
   recommended: boolean;
 }
 
-/** Snapshot of a session's GSD position. `available: false` → render nothing at all. */
+/** Snapshot of a session's GSD position. */
 export interface GsdState {
+  /** GSD exists on the laptop. Distinct from `available`: only `installed && !available`
+   *  can offer a Start button — otherwise there is nothing to start it with. */
+  installed: boolean;
+  /** This project has a `.planning/` directory, i.e. real workflow state to show. */
   available: boolean;
   /** no-project | needs-first-phase | planning | executing | verify-pending | … */
   situation: string;
@@ -228,6 +247,10 @@ export interface GsdState {
   actions: GsdAction[];
   /** id of the recommended entry in `actions`. */
   recommended: string | null;
+  paused: boolean;
+  blockers: string[];
+  verifyFailed: boolean;
+  execution: GsdExecution | null;
 }
 
 export type BridgeInboundMessage =

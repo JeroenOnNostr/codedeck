@@ -1,5 +1,5 @@
 import type { GsdState } from '../types';
-import { phaseStages, situationLabel } from '../utils/gsdStages';
+import { phaseStages, situationLabel, preflightLabel, recoveryChips } from '../utils/gsdStages';
 import '../styles/modal.css';
 import '../styles/gsd.css';
 
@@ -23,6 +23,7 @@ export default function GsdStagePanel({
   onClose: () => void;
 }) {
   const pct = Math.max(0, Math.min(100, gsd.percent));
+  const recovery = recoveryChips(gsd);
 
   return (
     <div className="modal-overlay bottom-sheet" onClick={onClose}>
@@ -42,6 +43,20 @@ export default function GsdStagePanel({
         </div>
         <div className="gsd-meter-caption">{pct}% of plans complete</div>
 
+        {recovery.length > 0 && (
+          <div className="gsd-recovery">
+            {recovery.map(c => (
+              <button key={c.id} className="gsd-action-row gsd-action-row--recovery" onClick={() => onRun(c.command)}>
+                <span className="gsd-action-label">{c.label}</span>
+                <span className="gsd-action-cmd">{c.command}</span>
+              </button>
+            ))}
+            {gsd.blockers.map((b, i) => (
+              <div key={i} className="gsd-blocker">{b}</div>
+            ))}
+          </div>
+        )}
+
         {gsd.phases.length > 0 && (
           <div className="gsd-phases">
             <div className="gsd-phases-head">
@@ -52,6 +67,7 @@ export default function GsdStagePanel({
 
             {gsd.phases.map((p) => {
               const { marks, label } = phaseStages(p);
+              const preflight = preflightLabel(p);
               const current = gsd.currentPhase === p.number;
               const tappable = !!p.command;
               return (
@@ -67,7 +83,9 @@ export default function GsdStagePanel({
                     {p.name}
                     <span className="gsd-phase-status">
                       {label}
-                      {p.plans > 0 && ` · ${p.summaries}/${p.plans} plans`}
+                      {/* Pre-flight beats raw counts: knowing a phase will stop and ask you N
+                          times is what decides whether to start it from a phone at all. */}
+                      {preflight ? ` · ${preflight}` : p.plans > 0 ? ` · ${p.summaries}/${p.plans} plans` : ''}
                     </span>
                   </span>
                   <span className="gsd-phase-marks" aria-label={label}>

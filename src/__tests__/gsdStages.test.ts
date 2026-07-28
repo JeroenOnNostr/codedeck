@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { phaseStages, situationLabel, stripSummary, recommendedAction } from '../utils/gsdStages';
+import { phaseStages, situationLabel, stripSummary, recommendedAction, executionLine, recoveryChips, preflightLabel } from '../utils/gsdStages';
 import type { GsdPhase, GsdState } from '../types';
 
 function phase(overrides: Partial<GsdPhase> = {}): GsdPhase {
@@ -12,12 +12,15 @@ function phase(overrides: Partial<GsdPhase> = {}): GsdPhase {
     recentlyTouched: false,
     action: null,
     command: null,
+    planCount: null,
+    needsYou: null,
     ...overrides,
   };
 }
 
 function state(overrides: Partial<GsdState> = {}): GsdState {
   return {
+    installed: true,
     available: true,
     situation: 'executing',
     summary: '',
@@ -28,6 +31,10 @@ function state(overrides: Partial<GsdState> = {}): GsdState {
     phases: [],
     actions: [],
     recommended: null,
+    paused: false,
+    blockers: [],
+    verifyFailed: false,
+    execution: null,
     ...overrides,
   };
 }
@@ -115,5 +122,77 @@ describe('recommendedAction', () => {
 
   it('returns null when GSD suggests nothing', () => {
     expect(recommendedAction(state({ actions: [] }))).toBeNull();
+  });
+});
+
+describe('executionLine', () => {
+  const exec = (o: Partial<NonNullable<GsdState['execution']>> = {}) => ({
+    phase: '2', plansTotal: 2, plansDone: 0, currentPlan: '02-01',
+    tasksDone: 2, tasksTotal: 3, lastTask: 'cover the build step', ...o,
+  });
+
+  it('reports live plan and task position while a phase runs', () => {
+    expect(executionLine(state({ execution: exec() })))
+      .toBe('Phase 2 · plan 1/2 · task 2/3 · cover the build step');
+  });
+
+  it('drops the denominator when the plan declares no tasks, rather than showing /0', () => {
+    expect(executionLine(state({ execution: exec({ tasksTotal: null, tasksDone: 4 }) })))
+      .toContain('task 4');
+    expect(executionLine(state({ execution: exec({ tasksTotal: null, tasksDone: 4 }) })))
+      .not.toContain('/0');
+  });
+
+  it('omits the task part entirely before anything is committed', () => {
+    const line = executionLine(state({ execution: exec({ tasksDone: 0, tasksTotal: null, lastTask: null }) }));
+    expect(line).toBe('Phase 2 · plan 1/2');
+  });
+
+  it('does not let the plan counter run past the total on the last plan', () => {
+    const line = executionLine(state({ execution: exec({ plansDone: 2, plansTotal: 2 }) }));
+    expect(line).toContain('plan 2/2');
+  });
+
+  it('returns null when no phase is executing', () => {
+    expect(executionLine(state({ execution: null }))).toBeNull();
+  });
+});
+
+describe('recoveryChips', () => {
+  it('offers nothing in a healthy project', () => {
+    expect(recoveryChips(state())).toEqual([]);
+  });
+
+  it('routes each recovery state to the command that gets out of it', () => {
+    expect(recoveryChips(state({ paused: true }))[0]).toMatchObject({ command: '/gsd-resume-work' });
+    expect(recoveryChips(state({ verifyFailed: true }))[0]).toMatchObject({ command: '/gsd-verify-work' });
+    expect(recoveryChips(state({ blockers: ['db down'] }))[0]).toMatchObject({ command: '/gsd-debug' });
+  });
+
+  it('pluralizes the blocker count', () => {
+    expect(recoveryChips(state({ blockers: ['a'] }))[0].label).toBe('Blocked');
+    expect(recoveryChips(state({ blockers: ['a', 'b'] }))[0].label).toBe('2 blockers');
+  });
+
+  it('can surface several at once', () => {
+    expect(recoveryChips(state({ paused: true, verifyFailed: true, blockers: ['x'] }))).toHaveLength(3);
+  });
+});
+
+describe('preflightLabel', () => {
+  it('states the interaction cost so you know whether to start it from a phone', () => {
+    expect(preflightLabel(phase({ planCount: 3, needsYou: 1 }))).toBe('3 plans · 1 needs you');
+  });
+
+  it('stays quiet about zero — "0 needs you" is noise on a phone-width row', () => {
+    expect(preflightLabel(phase({ planCount: 3, needsYou: 0 }))).toBe('3 plans');
+  });
+
+  it('singularizes a one-plan phase', () => {
+    expect(preflightLabel(phase({ planCount: 1, needsYou: 0 }))).toBe('1 plan');
+  });
+
+  it('returns null when GSD was not asked about this phase', () => {
+    expect(preflightLabel(phase())).toBeNull();
   });
 });

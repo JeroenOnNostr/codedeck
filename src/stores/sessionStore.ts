@@ -69,6 +69,10 @@ interface SessionStore {
   /** GSD workflow snapshot per sessionId. Absent, or `available: false`, means the session's
    *  cwd isn't a GSD project (or the bridge predates protocol v6) — the stage strip stays hidden. */
   remoteSessionGsd: Record<string, GsdState>;
+  /** Sessions the user explicitly opted into GSD on, keyed by sessionId. Only consulted when the
+   *  project has no `.planning/` yet — a real GSD project always shows the strip. Persisted, so
+   *  opting in survives a restart. */
+  gsdEnabledSessions: Record<string, boolean>;
   /** Latest-turn context-window occupancy in tokens, keyed by sessionId. This is a SNAPSHOT
    *  (input + cache_read + cache_creation of the most recent turn), NOT a cumulative sum — it
    *  falls after /compact. Divided by the model's max context to show a context-usage %. */
@@ -125,6 +129,7 @@ interface SessionStore {
   clearSettingPending: (sessionId: string) => void;
   refreshUsage: (sessionId: string) => Promise<void>;
   refreshGsd: (sessionId: string) => Promise<void>;
+  setGsdEnabled: (sessionId: string, enabled: boolean) => void;
   setRemoteSessionModeLocal: (sessionId: string, mode: AgentMode) => void;
   updateConfig: (config: AppConfig) => Promise<void>;
   initEventListeners: () => Promise<void>;
@@ -551,6 +556,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSettingPending: {},
   remoteSessionUsage: {},
   remoteSessionGsd: {},
+  gsdEnabledSessions: {},
   remoteSessionContext: {},
   remoteSessionContextWindow: {},
   remoteSessionContextPercentage: {},
@@ -1087,6 +1093,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (e) {
       console.error('[SessionStore] Failed to send GSD request:', e);
     }
+  },
+
+  setGsdEnabled: (sessionId, enabled) => {
+    set((state) => ({
+      gsdEnabledSessions: { ...state.gsdEnabledSessions, [sessionId]: enabled },
+    }));
+    void persistSet('codedeck_gsd_enabled', { ...get().gsdEnabledSessions });
+    // Opting in is the moment the user wants to see something, so fetch rather than wait for
+    // the next turn boundary.
+    if (enabled) void get().refreshGsd(sessionId);
   },
 
   setRemoteSessionModeLocal: (sessionId, mode) => {
@@ -1921,6 +1937,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       },
     );
 
+    const savedGsdEnabled = await persistGet<Record<string, boolean>>('codedeck_gsd_enabled');
+    if (savedGsdEnabled && typeof savedGsdEnabled === 'object') {
+      set({ gsdEnabledSessions: savedGsdEnabled });
+    }
+
     // Restore persisted remote session metadata (titles, etc.) before connecting
     const savedSessions = await persistGet<Record<string, RemoteSessionInfo[]>>('codedeck_remote_sessions');
     if (savedSessions && typeof savedSessions === 'object') {
@@ -2165,6 +2186,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const { [sessionId]: _p, ...restPending } = state.remoteSettingPending;
       const { [sessionId]: _su, ...restSessionUsage } = state.remoteSessionUsage;
       const { [sessionId]: _gsd, ...restSessionGsd } = state.remoteSessionGsd;
+      const { [sessionId]: _ge, ...restGsdEnabled } = state.gsdEnabledSessions;
       const { [sessionId]: _ctx, ...restContext } = state.remoteSessionContext;
       const { [sessionId]: _cw, ...restContextWindow } = state.remoteSessionContextWindow;
       const { [sessionId]: _cp, ...restContextPercentage } = state.remoteSessionContextPercentage;
@@ -2184,6 +2206,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSettingPending: restPending,
         remoteSessionUsage: restSessionUsage,
         remoteSessionGsd: restSessionGsd,
+        gsdEnabledSessions: restGsdEnabled,
         remoteSessionContext: restContext,
         remoteSessionContextWindow: restContextWindow,
         remoteSessionContextPercentage: restContextPercentage,
