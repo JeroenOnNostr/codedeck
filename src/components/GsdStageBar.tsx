@@ -33,7 +33,15 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
   const setupMode = !gsd.available;
   if (setupMode && !(enabled && gsd.installed)) return null;
 
+  // CD-055. A turn is already running, so the agent will not act on a new command — the bridge
+  // folds it into the running turn and it is lost. It still renders in the stream, which is worse
+  // than refusing it: the tap looks like it worked. Block at the source instead.
+  const busy = sessionState === 'running'
+    || sessionState === 'waiting_question'
+    || sessionState === 'waiting_permission';
+
   const run = (command: string) => {
+    if (busy) return;
     // Same path as typing it — the command shows up in the stream, so a tap is never invisible.
     // No refresh here: GSD state only moves once the command finishes, and MainPanel re-polls
     // on turn end.
@@ -45,16 +53,39 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
   if (setupMode) {
     const start = gsd.actions.find(a => a.id === 'new-project');
     const map = gsd.actions.find(a => a.id === 'map-codebase');
+    // CD-056. `new-project` runs `git init` when the directory isn't a repo, so starting GSD
+    // somewhere like a multi-project workspace root would create a repo on top of every project
+    // inside it. `hasGit === false` is an explicit "no" from the bridge; `undefined` means an older
+    // bridge that doesn't send the field, and must not disable the button.
+    const noRepo = gsd.hasGit === false;
+    const startBlocked = noRepo || busy;
+    const startTitle = noRepo
+      ? 'Not a git repository — GSD would run `git init` here'
+      : busy
+        ? 'Session is busy — wait for the current turn to finish'
+        : start?.command;
     return (
       <div className="gsd-bar gsd-bar--setup">
-        <span className="gsd-bar-summary gsd-bar-summary--muted">GSD not set up here</span>
+        <span className="gsd-bar-summary gsd-bar-summary--muted">
+          {noRepo ? 'GSD needs a git repository' : 'GSD not set up here'}
+        </span>
         {map && (
-          <button className="gsd-bar-action" onClick={() => run(map.command)} title={map.command}>
+          <button
+            className="gsd-bar-action"
+            onClick={() => run(map.command)}
+            disabled={busy}
+            title={busy ? 'Session is busy — wait for the current turn to finish' : map.command}
+          >
             Map codebase
           </button>
         )}
         {start && (
-          <button className="gsd-bar-action gsd-bar-action--primary" onClick={() => run(start.command)} title={start.command}>
+          <button
+            className="gsd-bar-action gsd-bar-action--primary"
+            onClick={() => run(start.command)}
+            disabled={startBlocked}
+            title={startTitle}
+          >
             Start GSD
           </button>
         )}
@@ -70,7 +101,9 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
 
   // While blocked or mid-execute the recommended action is stale or destructive to fire, so the
   // chip is suppressed. Offering "Execute phase 2" during phase 2 is how you get a double run.
-  const showAction = !waiting && !exec && action;
+  // `busy` rather than `waiting` so it also covers a plain running turn (CD-055) — a command sent
+  // then is swallowed by the turn in flight and never runs.
+  const showAction = !busy && !exec && action;
 
   const summary = waiting
     ? 'Waiting on you'
@@ -98,7 +131,8 @@ export default function GsdStageBar({ sessionId, sessionState }: { sessionId: st
             key={c.id}
             className="gsd-bar-action gsd-bar-action--recovery"
             onClick={() => run(c.command)}
-            title={c.command}
+            disabled={busy}
+            title={busy ? 'Session is busy — wait for the current turn to finish' : c.command}
           >
             {c.label}
           </button>

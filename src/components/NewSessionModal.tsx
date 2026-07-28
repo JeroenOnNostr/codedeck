@@ -19,6 +19,8 @@ export default function NewSessionModal() {
   const [loading, setLoading] = useState(false);
   const [testSession, setTestSession] = useState(false);
   const [model, setModel] = useState<string>(defaultModel || DEFAULT_MODEL);
+  // CDB-033. Empty = the workspace root, which is what every session used to get unconditionally.
+  const [projectDir, setProjectDir] = useState('');
 
   const close = () => setNewSessionOpen(false);
 
@@ -35,7 +37,7 @@ export default function NewSessionModal() {
     const handleRemoteCreate = () => {
       // Open a usable session view instantly; the real session reconciles in the
       // background and any first message typed now is flushed once it's ready.
-      startOptimisticRemoteSession(machine, testSession, model);
+      startOptimisticRemoteSession(machine, testSession, model, projectDir.trim() || undefined);
       close();
     };
 
@@ -57,8 +59,25 @@ export default function NewSessionModal() {
             </>
           )}
 
+          <label className="modal-label">Project folder</label>
+          <input
+            className="modal-input"
+            value={projectDir}
+            onChange={(e) => setProjectDir(e.target.value)}
+            placeholder="workspace root"
+            list="project-dirs"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <datalist id="project-dirs">
+            {projects.map((p) => <option key={p} value={p} />)}
+          </datalist>
           <p className="modal-hint" style={{ marginBottom: 24 }}>
-            Opens a new Claude Code terminal in the VSCode workspace. Session name and project are assigned automatically.
+            Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the
+            workspace root, or name a subdirectory to root the session in one project — tools that read
+            the session's directory, GSD above all, then see that project instead of the whole workspace.
+            Session name is assigned automatically.
           </p>
 
           <label className="modal-label">Model</label>

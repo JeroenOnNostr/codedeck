@@ -40,6 +40,8 @@ interface OptimisticSession {
   model?: string;
   effortLevel?: EffortLevel;
   testSession?: boolean;
+  /** Project subdirectory the session was requested in (CDB-033); replayed on retry. */
+  cwd?: string;
   /** Set once the bridge's session-pending for this create is associated with us. */
   pendingId?: string;
   /** First message(s) typed before the real session existed — flushed to the wire on adoption. */
@@ -146,9 +148,10 @@ interface SessionStore {
   getMachineForSession: (sessionId: string) => RemoteMachine | null;
   requestSessionHistory: (sessionId: string) => Promise<void>;
   requestRefreshSessions: () => void;
-  createRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string) => Promise<void>;
+  createRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string, cwd?: string) => Promise<void>;
   /** Optimistic create: opens a usable session view instantly, then fires the real create. */
-  startOptimisticRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string) => void;
+  /** `cwd`: optional project subdirectory to root the session in (CDB-033). Omitted = workspace root. */
+  startOptimisticRemoteSession: (machine: RemoteMachine, testSession?: boolean, model?: string, cwd?: string) => void;
   /** Re-fire a create for an optimistic session that timed out or failed. */
   retryOptimisticSession: (localId: string) => void;
   deleteRemoteSession: (sessionId: string) => void;
@@ -2032,7 +2035,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }, 3_000);
   },
 
-  createRemoteSession: async (machine, testSession, model) => {
+  createRemoteSession: async (machine, testSession, model, cwd) => {
     try {
       const { default_effort: defaultEffort, model: configModel } = get().config;
       await sendCreateSessionRequest(
@@ -2040,13 +2043,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         defaultEffort !== 'auto' ? defaultEffort : undefined,
         model ?? (configModel || undefined),
         testSession,
+        cwd,
       );
     } catch (e) {
       console.error('[SessionStore] Failed to create remote session:', e);
     }
   },
 
-  startOptimisticRemoteSession: (machine, testSession, model) => {
+  startOptimisticRemoteSession: (machine, testSession, model, cwd) => {
     const localId = crypto.randomUUID();
     const rowId = `optimistic:${localId}`;
     const { default_effort: defaultEffort, model: configModel } = get().config;
@@ -2082,6 +2086,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         model: resolvedModel,
         effortLevel,
         testSession: !!testSession,
+        cwd,
         bufferedMessages: [],
         timeoutId,
         status: 'starting',
@@ -2106,7 +2111,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     get().addOutput(rowId, { entry_type: 'system', content: 'Starting session…', timestamp: now });
 
     // Fire the real create over the wire — don't block the UI on it.
-    void get().createRemoteSession(machine, testSession, resolvedModel);
+    void get().createRemoteSession(machine, testSession, resolvedModel, cwd);
   },
 
   retryOptimisticSession: (localId) => {
@@ -2127,7 +2132,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return { optimisticSessions: next, optimisticQueueByMachine: queue };
     });
     get().addOutput(`optimistic:${localId}`, { entry_type: 'system', content: 'Retrying…', timestamp: new Date().toISOString() });
-    void get().createRemoteSession(machine, opt.testSession, opt.model);
+    void get().createRemoteSession(machine, opt.testSession, opt.model, opt.cwd);
   },
 
   deleteRemoteSession: (sessionId) => {

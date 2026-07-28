@@ -233,3 +233,133 @@ describe('GsdStageBar — live states', () => {
     expect(sent).toEqual(['/gsd-debug']);
   });
 });
+
+/**
+ * CD-055 / CD-056 — the two ways a tap could do the wrong thing.
+ *
+ * CD-055: `run()` was fire-and-forget. Tapping while a turn was in flight posted the command into
+ * the stream, so it looked sent, but the agent never acted on it. Losing a tap silently is worse
+ * than refusing it.
+ *
+ * CD-056: `Start GSD` was offered with no `has_git` check. GSD's new-project runs `git init` when
+ * the directory isn't a repo, so tapping it at a multi-project root would create a repo on top of
+ * every project inside it.
+ */
+describe('GsdStageBar — tap guards', () => {
+  const notAProject = (o: Partial<GsdState> = {}) => gsd({
+    installed: true,
+    available: false,
+    situation: 'no-project',
+    phases: [],
+    actions: [
+      { id: 'new-project', label: 'Start a new project', command: '/gsd-new-project', recommended: true },
+      { id: 'map-codebase', label: 'Map an existing codebase', command: '/gsd-map-codebase', recommended: false },
+    ],
+    recommended: 'new-project',
+    ...o,
+  });
+
+  function renderWith(state: string | undefined, sessionId = 's1') {
+    act(() => { root.render(<GsdStageBar sessionId={sessionId} sessionState={state} />); });
+    return container.innerHTML;
+  }
+
+  it('swallows a tap while a turn is running instead of posting a command that never runs', () => {
+    const sent: string[] = [];
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: gsd() },
+      sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
+    });
+    renderWith('running');
+    // The chip is suppressed entirely while busy, so there is nothing to tap...
+    const chip = container.querySelector('.gsd-bar-action:not(.gsd-bar-action--recovery)');
+    expect(chip).toBeNull();
+    // ...and even a recovery chip that IS rendered refuses to fire.
+    expect(sent).toEqual([]);
+  });
+
+  it('disables the recovery chips while a turn is running', () => {
+    const sent: string[] = [];
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: gsd({ paused: true }) },
+      sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
+    });
+    renderWith('running');
+    const chip = container.querySelector('.gsd-bar-action--recovery') as HTMLButtonElement | null;
+    if (chip) {
+      expect(chip.disabled).toBe(true);
+      act(() => { chip.click(); });
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it('still sends normally when the session is idle', () => {
+    // The guard must not break the ordinary path — this is the behaviour CD-053 shipped for.
+    const sent: string[] = [];
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: gsd() },
+      sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
+    });
+    renderWith('idle');
+    const chip = container.querySelector('.gsd-bar-action') as HTMLButtonElement;
+    expect(chip.disabled).toBe(false);
+    act(() => { chip.click(); });
+    expect(sent).toEqual(['/gsd-execute-phase 2']);
+  });
+
+  it('disables Start GSD when the directory is not a git repo', () => {
+    const sent: string[] = [];
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject({ hasGit: false }) },
+      gsdEnabledSessions: { s1: true },
+      sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
+    });
+    const html = renderWith('idle');
+    expect(html).toContain('GSD needs a git repository');
+    const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    act(() => { start.click(); });
+    expect(sent).toEqual([]);
+  });
+
+  it('allows Start GSD in a real git repo', () => {
+    const sent: string[] = [];
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject({ hasGit: true }) },
+      gsdEnabledSessions: { s1: true },
+      sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
+    });
+    const html = renderWith('idle');
+    expect(html).toContain('GSD not set up here');
+    const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    act(() => { start.click(); });
+    expect(sent).toEqual(['/gsd-new-project']);
+  });
+
+  it('does not disable Start GSD when an older bridge omits hasGit', () => {
+    // Protocol < v8 never sends the field. `undefined` must not be read as "no repo", or the
+    // button would go permanently dead against an un-upgraded laptop.
+    const sent: string[] = [];
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject() },
+      gsdEnabledSessions: { s1: true },
+      sendMessage: (async (_id: string, text: string) => { sent.push(text); }) as never,
+    });
+    renderWith('idle');
+    const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    act(() => { start.click(); });
+    expect(sent).toEqual(['/gsd-new-project']);
+  });
+
+  it('disables Start GSD while the session is busy even in a real repo', () => {
+    useSessionStore.setState({
+      remoteSessionGsd: { s1: notAProject({ hasGit: true }) },
+      gsdEnabledSessions: { s1: true },
+    });
+    renderWith('waiting_question');
+    const start = container.querySelector('.gsd-bar-action--primary') as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+  });
+});

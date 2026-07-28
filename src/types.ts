@@ -236,6 +236,15 @@ export interface GsdState {
   installed: boolean;
   /** This project has a `.planning/` directory, i.e. real workflow state to show. */
   available: boolean;
+  /**
+   * This directory is inside a git worktree. GSD's `new-project` runs `git init` when it isn't, so
+   * "Start GSD" on a non-repo can create a repo over whatever is there — at a multi-project root,
+   * over every nested repo. Gates the Start button (CD-056).
+   *
+   * Optional: older bridges (protocol < v8) don't send it, and a missing value must not disable
+   * the button for them.
+   */
+  hasGit?: boolean;
   /** no-project | needs-first-phase | planning | executing | verify-pending | … */
   situation: string;
   summary: string;
@@ -282,7 +291,9 @@ export type BridgeOutboundMessage =
   | { type: 'usage-request'; sessionId: string }
   | { type: 'gsd-request'; sessionId: string }
   | { type: 'history-request'; sessionId: string; afterSeq?: number }
-  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string; testSession?: boolean }
+  /** `cwd`: optional project subdirectory (relative to the workspace root) to root the session in.
+   *  Omitted = the workspace root, i.e. the pre-CDB-033 behaviour. Bridge validates it. */
+  | { type: 'create-session'; defaultEffort?: EffortLevel; model?: string; testSession?: boolean; cwd?: string }
   | { type: 'refresh-sessions' }
   | { type: 'interrupt'; sessionId: string }
   | { type: 'close-session'; sessionId: string }
