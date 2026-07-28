@@ -59,6 +59,43 @@
     the touch keyboard**, and nothing on screen said which phase you were on.
   </details>
 
+- [ ] **CD-054: strip reads "Phase 1 of 1 · 100%" on a 5-phase project** — the single most misleading
+  thing the strip can currently show: it says *finished* when the project is 20% done.
+  `smart-entry --json` derives `total_phases` from the number of directories in `.planning/phases/`,
+  not from ROADMAP.md. Only planned phases have a directory, so after finishing phase 1 of 5 it
+  returns `total_phases: 1`, `summary: "Phase 1 of 1 · executing"`, and `gsd-tools progress` reports
+  `"percent": 100`. `gsdState.ts` feeds both into the strip.
+  **The correct value is already in the same payload** — `roadmap_total_phases: 5` — and
+  `roadmap.analyze` parses all 5 phases fine.
+  *Repro (verified 2026-07-28 in `gsd-testbed/`):* a GSD project with a 5-phase ROADMAP.md and only
+  phase 1 planned/executed → `gsd-tools smart-entry --json` shows `total_phases: 1` alongside
+  `roadmap_total_phases: 5`.
+  *Fix:* in `gsdState.ts`, prefer `signals.roadmap_total_phases` when non-null; fall back to
+  `total_phases`. Also worth not rendering `percent` when the two disagree.
+
+- [ ] **CD-055: strip actions are silently dropped when the session is busy** — `GsdStageBar.run()`
+  (`src/components/GsdStageBar.tsx:36-42`) is fire-and-forget: `void sendMessage(sessionId, command)`
+  with no busy guard. Tapping `Start GSD` / a recommended chip while a turn is in flight posts the
+  command into the stream — so it *looks* like it worked — but it never reaches the agent as an
+  executable instruction.
+  *Repro (observed twice, 2026-07-28):* with a turn running, tap `Start GSD`. `/gsd-new-project`
+  renders as a sent message; nothing runs; no error.
+  *Fix:* disable strip buttons while `sessionState` is busy (the component already receives
+  `sessionState` for the waiting case), or queue and re-send on turn end. Silently losing a tap is
+  worse than refusing it.
+
+- [ ] **CD-056: `Start GSD` is offered where GSD would do real damage** — setup mode
+  (`GsdStageBar.tsx:44-63`) shows the button with no `has_git` check, even though `smart-entry`
+  returns that signal. At the workspace root `has_git: false`, `is_brownfield: true`, and
+  `new-project.md` Step 1 says *"If `has_git` false: `git init`"* — so a tap would `git init` on top
+  of **27 sibling repos** and scaffold one `.planning/` treating yenn + kubo + gantry + atna +
+  rocket-pilot as a single project.
+  *Repro:* `cd "<workspace root>" && gsd-tools query init.new-project` → `has_git: false`,
+  `project_exists: false`, `is_brownfield: true`; `find . -maxdepth 2 -name .git -type d | wc -l` → 27.
+  *Fix:* when `has_git` is false, render `Start GSD` disabled with the reason ("not a git repo"), and
+  consider also refusing when the directory contains multiple nested `.git` dirs. Blocked in practice
+  by **CDB-033** — until a session can be rooted somewhere else, the root is the *only* target.
+
 ## Bugs
 
 - [ ] **CD-001: processGiftWrap swallows exceptions silently** — `nostrService.ts:169` — NIP-17 gift-wrap decryption failures return `null` with minimal logging, making DM debugging hard. Added `console.warn` but could surface to UI.
