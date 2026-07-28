@@ -59,42 +59,77 @@
     the touch keyboard**, and nothing on screen said which phase you were on.
   </details>
 
-- [ ] **CD-054: strip reads "Phase 1 of 1 · 100%" on a 5-phase project** — the single most misleading
-  thing the strip can currently show: it says *finished* when the project is 20% done.
-  `smart-entry --json` derives `total_phases` from the number of directories in `.planning/phases/`,
-  not from ROADMAP.md. Only planned phases have a directory, so after finishing phase 1 of 5 it
-  returns `total_phases: 1`, `summary: "Phase 1 of 1 · executing"`, and `gsd-tools progress` reports
-  `"percent": 100`. `gsdState.ts` feeds both into the strip.
-  **The correct value is already in the same payload** — `roadmap_total_phases: 5` — and
-  `roadmap.analyze` parses all 5 phases fine.
-  *Repro (verified 2026-07-28 in `gsd-testbed/`):* a GSD project with a 5-phase ROADMAP.md and only
-  phase 1 planned/executed → `gsd-tools smart-entry --json` shows `total_phases: 1` alongside
-  `roadmap_total_phases: 5`.
-  *Fix:* in `gsdState.ts`, prefer `signals.roadmap_total_phases` when non-null; fall back to
-  `total_phases`. Also worth not rendering `percent` when the two disagree.
+- [x] **CD-054: strip reads "Phase 1 of 1 · 100%" on a 5-phase project** — ✅ code + tests done,
+  **device-verify owed**. Fixed in `3f29615` / bridge `46926e4`: `resolvePhaseTotals()` in
+  `gsdState.ts` prefers `roadmap_total_phases` and scales the percentage by the fraction of the
+  roadmap GSD can see. Verified against the real `gsd-testbed` project:
+  `Phase 1/1 · 100%` → `Phase 1/5 · 20%`. Needs **bridge protocol v8** (the phone reads the
+  corrected `totalPhases`/`percent` the bridge now sends). 174 bridge tests, 113 phone tests.
 
-- [ ] **CD-055: strip actions are silently dropped when the session is busy** — `GsdStageBar.run()`
-  (`src/components/GsdStageBar.tsx:36-42`) is fire-and-forget: `void sendMessage(sessionId, command)`
-  with no busy guard. Tapping `Start GSD` / a recommended chip while a turn is in flight posts the
-  command into the stream — so it *looks* like it worked — but it never reaches the agent as an
-  executable instruction.
-  *Repro (observed twice, 2026-07-28):* with a turn running, tap `Start GSD`. `/gsd-new-project`
-  renders as a sent message; nothing runs; no error.
-  *Fix:* disable strip buttons while `sessionState` is busy (the component already receives
-  `sessionState` for the waiting case), or queue and re-send on turn end. Silently losing a tap is
-  worse than refusing it.
+  <details><summary>Device-verification run-sheet</summary>
 
-- [ ] **CD-056: `Start GSD` is offered where GSD would do real damage** — setup mode
-  (`GsdStageBar.tsx:44-63`) shows the button with no `has_git` check, even though `smart-entry`
-  returns that signal. At the workspace root `has_git: false`, `is_brownfield: true`, and
-  `new-project.md` Step 1 says *"If `has_git` false: `git init`"* — so a tap would `git init` on top
-  of **27 sibling repos** and scaffold one `.planning/` treating yenn + kubo + gantry + atna +
-  rocket-pilot as a single project.
-  *Repro:* `cd "<workspace root>" && gsd-tools query init.new-project` → `has_git: false`,
-  `project_exists: false`, `is_brownfield: true`; `find . -maxdepth 2 -name .git -type d | wc -l` → 27.
-  *Fix:* when `has_git` is false, render `Start GSD` disabled with the reason ("not a git repo"), and
-  consider also refusing when the directory contains multiple nested `.git` dirs. Blocked in practice
-  by **CDB-033** — until a session can be rooted somewhere else, the root is the *only* target.
+  **Preconditions.** Phone build from this commit; laptop running the CDB-033 bridge. A GSD project
+  whose ROADMAP.md has **more phases than have been planned** — `gsd-testbed/` in this workspace is
+  exactly that (5 phases, only phase 1 planned and executed). Confirm the raw disagreement first:
+  `cd gsd-testbed && node ~/.claude/gsd-core/bin/gsd-tools.cjs smart-entry --json` → shows
+  `total_phases: 1` next to `roadmap_total_phases: 5`.
+
+  **Steps.**
+  1. Start a session with **Project folder** = `gsd-testbed` (needs CD-056/CDB-033 below).
+  2. Read the collapsed strip line.
+
+  **Pass oracle.** The strip reads **`Phase 1/5`** and the meter shows **20%**.
+  **Pre-fix behaviour it replaces:** `Phase 1/1` at **100%** — i.e. the phone claimed the project
+  was finished when four of its five phases had not been started. Seeing `1/1` or `100%` is a fail.
+  A project where every phase is already planned is NOT a valid test — the two counts agree there
+  and the bug is invisible.
+  </details>
+
+- [x] **CD-055: strip actions are silently dropped when the session is busy** — ✅ code + tests done,
+  **device-verify owed**. Fixed in `3f29615`: `GsdStageBar.run()` refuses while the session is
+  `running` / `waiting_question` / `waiting_permission`, the recommended chip is suppressed, and
+  recovery chips render `disabled` with a reason in the tooltip.
+  *Original repro (observed twice, 2026-07-28):* with a turn in flight, tap `Start GSD` —
+  `/gsd-new-project` rendered as a sent message, nothing ran, no error.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Phone build from this commit; a GSD project session (`gsd-testbed` works).
+
+  **Steps + pass oracle.**
+  1. Send any prompt that takes a few seconds ("count slowly to 20"). While it is still running,
+     look at the strip. → The recommended-action chip is **gone**, and any recovery chip is
+     visibly **disabled**. Tapping a disabled chip does nothing and posts nothing to the stream.
+     **Pre-fix: the chip stayed live, the tap posted the command into the stream as if sent, and
+     the command silently never ran.**
+  2. Wait for the turn to finish. → The chip comes back and a tap runs the command normally.
+     This half matters as much as the first: the guard must not brick the ordinary path.
+  </details>
+
+- [x] **CD-056: `Start GSD` is offered where GSD would do real damage** — ✅ code + tests done,
+  **device-verify owed**. Fixed in `3f29615` + bridge `46926e4`: the bridge now surfaces `has_git`
+  on `GsdState`, and setup mode disables `Start GSD` when it is `false`, reading
+  *"GSD needs a git repository"*. `hasGit` is optional — an older bridge omits it and `undefined`
+  must not read as "no repo", or the button would go dead against an un-upgraded laptop.
+  *Why it mattered:* at the workspace root `has_git: false`, and `new-project.md` §1 says
+  *"If `has_git` false: `git init`"* — a tap would have run `git init` over **27 sibling repos**
+  and scaffolded one `.planning/` treating yenn + kubo + gantry + atna + rocket-pilot as one project.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Phone build from this commit; laptop on bridge `46926e4`+.
+  Two dirs: a non-repo (`mkdir -p /tmp/not-a-repo`) and a real repo (`gsd-testbed`).
+
+  **Steps + pass oracle.**
+  1. Session with **Project folder** = a path that is not a git repo. ⋯ menu → *Enable GSD for this
+     session*. → Strip reads **"GSD needs a git repository"** and `Start GSD` is **disabled**;
+     tapping it posts nothing. **Pre-fix: the button was enabled and would have run `git init`.**
+  2. Session with **Project folder** = `gsd-testbed`, GSD enabled. → Strip reads its normal GSD
+     line (that project is already set up), i.e. the guard did not over-fire.
+  3. Point a session at a git repo with no `.planning/` (`git init /tmp/plain-verify`), enable GSD.
+     → Reads "GSD not set up here" with `Start GSD` **enabled**. This is the case the guard must
+     NOT block; if it is disabled here, the `hasGit` plumbing is broken.
+  </details>
 
 ## Bugs
 
