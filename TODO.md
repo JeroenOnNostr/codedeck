@@ -2,6 +2,35 @@
 
 ## GSD integration
 
+- [x] **CD-053: GSD start button + waiting / live / recovery states** — ✅ code + tests done, **device-verify owed**. Needs bridge **CDB-032 (protocol v7)**.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Phone build from this commit; laptop running the CDB-032 bridge. Two working dirs:
+  a GSD one (`cp -r ../codedeck-bridge-vscode/src/__tests__/fixtures/gsd-project /tmp/gsd-verify`) and a
+  plain one with no `.planning/` (`mkdir /tmp/plain-verify && git init /tmp/plain-verify`).
+
+  **Steps + pass oracle.**
+  1. Open a session on `/tmp/plain-verify`. → **No strip.** (Pre-fix: also no strip, but no way to get one.)
+  2. ⋯ menu → it offers **"Enable GSD for this session"**. Tap it. → A quiet strip appears reading
+     *GSD not set up here* with **Map codebase** and **Start GSD** buttons. **This is the whole point of
+     the change — before it, this state was unreachable.**
+  3. Tap **Start GSD**. → `/gsd-new-project` appears in the stream and Claude Code begins the interview.
+     An `Unknown slash command` error means the flat/namespaced command detection picked wrong.
+  4. Kill the session, reopen it. → The opt-in survived (persisted per sessionId).
+  5. Open a session on `/tmp/gsd-verify` **without** enabling anything. → Strip appears anyway; a real
+     GSD project must never need the toggle.
+  6. Tap the recommended chip (`/gsd-execute-phase 2`) and watch during the run. → The strip switches to
+     **`Phase 2 · plan 1/2 · task N/3 · <task name>`** and the numbers **move as tasks commit**. Pre-fix
+     behaviour: a frozen `Phase 2/3 · Executing · 50%` for the entire run. The action chip disappears
+     while running.
+  7. When GSD hits a checkpoint / asks a question. → Strip reads **"Waiting on you"**, bold, no chip.
+  8. Open the sheet on phase 2. → Row reads **"Ready to execute · 2 plans · 1 needs you"**.
+
+  **Recovery states (harder to induce; verify at least one).** Run `/gsd-pause-work` in the session →
+  strip should show a **Resume** chip sending `/gsd-resume-work`.
+  </details>
+
 - [x] **CD-052: GSD stage strip under the session header** — ✅ code + tests done, device-verify owed.
   Collapsible one-line strip (`GsdStageBar.tsx`) showing milestone · phase N/M · situation · %, with a
   tappable chip that sends the next `/gsd-*` command; expands to a bottom sheet (`GsdStagePanel.tsx`)
