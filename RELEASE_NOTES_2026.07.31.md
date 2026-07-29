@@ -1,7 +1,8 @@
 # CodeDeck 2026.07.31 — starting a GSD project from the phone actually works
 
 `versionCode 20260731` · needs bridge **protocol v8** (`2026.7.30`, already shipped — **no bridge
-upgrade required for anything below**).
+upgrade required for anything below**). The one exception is the workspace listing in the folder
+picker, which asks a **v9** bridge for data and falls back to the old behaviour without one.
 
 ## The problem
 
@@ -61,6 +62,22 @@ it asks, and the header switches modes in one tap.
 Also in the ⋯ menu: **New GSD project…**, reachable from any session, so starting one never depends
 on standing in the right directory first.
 
+## The Project folder picker offers your projects, not the workspace
+
+The list behind **Project folder** was built from the sessions already running, so on a workspace
+where every session starts at the root it held exactly one entry — the name of the workspace itself.
+Choosing a project meant typing its folder name from memory, on a phone, which is the one place that
+is hardest to do.
+
+It now lists what the workspace actually holds, sent alongside the session list by a **v9** bridge:
+folders that already host a session float to the top — the likeliest next pick — and typing narrows
+the rest. **"Create it if it doesn't exist"** appears only for a name the workspace does not already
+have; for a folder the bridge just said exists, it was a question about nothing. The field stays free
+text, because typing a new name is how "Start a new GSD project" begins.
+
+Against a v8 bridge the picker falls back to exactly the old list, so nothing here breaks by not
+upgrading — you simply don't get the listing.
+
 ## Verified
 
 Driven end to end on a Pixel 9 Pro Fold against the live bridge: folder created and `git init`ed,
@@ -69,11 +86,13 @@ session rooted, mode switched, `/gsd-new-project` sent, ~10 question groups answ
 with **Discuss the first phase** as a tappable chip. Full results:
 `docs/CD-058-GSD-DEVICE-VERIFY-RESULTS.md`.
 
-126 phone tests, 186 bridge tests, `tsc` clean on both.
+131 phone tests, 198 bridge tests, `tsc` clean on both. The folder picker (above) ships with host
+tests only — its on-device check is still owed.
 
 ## Companion bridge `2026.7.31` (optional)
 
-Not required for anything above. It fixes **CDB-034**: the bridge appends a metadata request to a
+Only the workspace listing in the folder picker needs it (protocol **v9**, CDB-035 — the bridge now
+sends the workspace's project folders with every session list). It also fixes **CDB-034**: the bridge appends a metadata request to a
 session's first message, and Claude Code treats everything after a slash command's name as that
 command's arguments — so `/gsd-execute-phase 2` was arriving as phase
 `"2\n\n<!-- emit-session-meta: … -->"`. Slash commands are now left byte-identical, and the metadata

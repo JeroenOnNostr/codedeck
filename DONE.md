@@ -1,5 +1,29 @@
 # Done — Codedeck
 
+## Zapstore release 2026.07.31 — GSD project kickoff + real folder picker (2026-07-30)
+
+- [x] **Published CodeDeck `2026.7.31` to Zapstore** — ships **CD-058** (New Session opens with
+  "Start a new GSD project"; disabled buttons finally look disabled; setup-mode strip states) and
+  **CD-059** (the Project folder picker lists the workspace's real project folders, from a **v9**
+  bridge, with a fallback to the old list on v8). versionCode `20260731`, cert `c5d0cba4…fbc5`.
+  **The APK was rebuilt for this publish, not reused**: the `CodeDeck-v2026.07.31-android.apk`
+  sitting in the tree had been built 20 minutes *before* CD-059 landed, so publishing it would have
+  shipped release notes describing a picker the binary did not contain. Rebuilt from HEAD
+  (`6d6439c`) via `./dev.sh android-build`; presence of CD-059 confirmed in the freshly built
+  `dist/assets/index-*.js` (the Tauri Android APK embeds the web assets in `libcodedeck_lib.so`, so
+  grepping the APK's `assets/` for them finds nothing — check `dist/` instead).
+  Signer proven **before** publishing (`zsp publish -q --offline` → all three events
+  `f07e0b1af066b483…c367`, the listing owner; a mismatch forks the listing instead of updating it).
+  Events 32267 / 30063 / 3063 landed `2026-07-29T23:13:21Z`; CDN blob
+  `7bf81834…3c3a` fetched back and `cmp`-verified byte-identical, and the kind-3063 event carries
+  the matching `x` / `version_code` / cert. `zapstore.yaml` temp-injection (`release_source` /
+  `release_notes` / `version`) reverted. Version is **one day ahead of the wall clock**, as with the
+  last three releases — `2026.7.30` was published on 07-28 and YYYYMMDD versionCodes must stay
+  monotonic. arm64-v8a only, as always (`dev.sh android-build` targets aarch64). Tag
+  `codedeck-v2026.07.31`. Bridge `2026.7.31` (CDB-034 + CDB-035 / protocol v9) is **still an
+  unpublished VSIX**, so the folder listing stays inert until a user builds the bridge from source —
+  the picker's v8 fallback means nothing breaks meanwhile. (2026-07-30)
+
 ## GSD from the phone — device-verified (2026-07-28)
 
 Evidence for everything in this section: `docs/CD-058-GSD-DEVICE-VERIFY-RESULTS.md` (Pixel 9 Pro

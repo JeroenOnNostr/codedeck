@@ -3,7 +3,7 @@
 ## GSD integration
 
 - [ ] **CD-059: the Project folder picker listed the workspace, not the projects in it** — ✅ code +
-  tests done, **device-verify owed**. The dropdown was fed by `machineSessions.map(s => s.project)`
+  tests done, **device-verify owed**; shipped to Zapstore in `2026.7.31` (2026-07-30). The dropdown was fed by `machineSessions.map(s => s.project)`
   — the folder names of sessions already running — so on a workspace where every session starts at
   the root it offered a single entry: *"VScode workspace for building nostr apps"*. Choosing a
   project meant typing its folder name from memory, on a phone, which is the one place that is
