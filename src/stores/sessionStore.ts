@@ -124,6 +124,11 @@ interface SessionStore {
    *  display over the local tokens/window computation; absent for older bridges / before first result. */
   remoteSessionContextPercentage: Record<string, number>;
   machineProtocolVersion: Record<string, number>; // keyed by machine pubkeyHex — bridge protocol version (>=1 supports model selection)
+  /** Project folders in each machine's workspace, keyed by machine pubkeyHex, as reported by a
+   *  protocol-v9+ bridge. This is the New Session picker's folder list: the phone can't read the
+   *  laptop's filesystem, so without it the picker could only name folders that already had a
+   *  session running in them (CD-059). Empty/absent for older bridges. */
+  machineFolders: Record<string, string[]>;
   historyLoading: Record<string, boolean>;
   refreshing: boolean;
   /** Pending sessions awaiting JSONL file creation. Map<pendingId, metadata>. */
@@ -240,6 +245,11 @@ const CONFIG_PERSIST_KEY = 'codedeck_config';
 /** Strip secret fields before persisting to localStorage / Tauri store. */
 function stripSecrets(config: AppConfig): AppConfig {
   return { ...config, anthropic_api_key: null, github_pat: null };
+}
+
+/** Element-wise compare, so a value re-sent unchanged on every heartbeat isn't stored as new. */
+function arraysEqual(a: string[] | undefined, b: string[]): boolean {
+  return !!a && a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 // --- History chunk tracking (module-level, not in store state) ---
@@ -660,6 +670,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   remoteSessionContextWindow: {},
   remoteSessionContextPercentage: {},
   machineProtocolVersion: {},
+  machineFolders: {},
   historyLoading: {},
   refreshing: false,
   pendingSessions: new Map(),
@@ -1299,6 +1310,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         autoHistoryRequested.delete(id);
         seenBridgeSeqs.delete(id);
       }
+      const { [pubkeyHex]: _folders, ...restFolders } = state.machineFolders;
+      const { [pubkeyHex]: _protocol, ...restProtocol } = state.machineProtocolVersion;
       return {
         machines: state.machines.filter(m => m.pubkeyHex !== pubkeyHex),
         remoteSessions: restSessions,
@@ -1309,6 +1322,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         remoteSessionContextWindow: cleanedContextWindow,
         remoteSessionContextPercentage: cleanedContextPercentage,
         historyLoading: cleanedLoading,
+        // Per-machine facts, not per-session: they'd otherwise outlive the machine and describe a
+        // workspace (and a bridge version) the phone is no longer paired to.
+        machineFolders: restFolders,
+        machineProtocolVersion: restProtocol,
       };
     });
     persistSet('codedeck_machines', get().machines);
@@ -1332,7 +1349,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     setBridgeHandlers(
       // onSessionList — incremental merge, preserves pending placeholders, deduplicates
-      ({ machine: _machineName, sessions: incomingSessions, authStatus, protocolVersion }) => {
+      ({ machine: _machineName, sessions: incomingSessions, authStatus, protocolVersion, folders }) => {
         const machines = get().machines;
         const machine = machines.find(m => m.hostname === _machineName) || machines[0];
         if (machine) {
@@ -1498,6 +1515,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
               } : {}),
               ...(protocolVersion !== undefined && state.machineProtocolVersion[machine.pubkeyHex] !== protocolVersion
                 ? { machineProtocolVersion: { ...state.machineProtocolVersion, [machine.pubkeyHex]: protocolVersion } }
+                : {}),
+              // Same shape as the protocol version above: a per-machine fact carried on the
+              // session list, replaced only when it actually changed so the New Session modal
+              // doesn't re-render on every heartbeat.
+              ...(folders !== undefined
+                  && !arraysEqual(state.machineFolders[machine.pubkeyHex], folders)
+                ? { machineFolders: { ...state.machineFolders, [machine.pubkeyHex]: folders } }
                 : {}),
             };
           });

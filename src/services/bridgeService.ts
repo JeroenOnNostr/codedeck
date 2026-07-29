@@ -33,7 +33,7 @@ import { uploadToBlossom, DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload'
 const OUTPUT_EVENT_KIND = 4515;
 const SESSION_LIST_EVENT_KIND = 30515;
 
-type SessionListHandler = (msg: { machine: string; sessions: RemoteSessionInfo[]; authStatus?: import('../types').AuthStatus; protocolVersion?: number }) => void;
+type SessionListHandler = (msg: { machine: string; sessions: RemoteSessionInfo[]; authStatus?: import('../types').AuthStatus; protocolVersion?: number; folders?: string[] }) => void;
 type OutputHandler = (sessionId: string, entry: RemoteOutputEntry, seq: number) => void;
 type HistoryHandler = (sessionId: string, entries: Array<{ seq: number; entry: RemoteOutputEntry }>, totalEntries: number, chunkIndex?: number, totalChunks?: number, requestId?: string) => void;
 type StatusHandler = (machine: string, status: 'connected' | 'disconnected' | 'connecting') => void;
@@ -640,7 +640,7 @@ function handleBridgeEvent(event: { pubkey: string; content: string; created_at:
     switch (msg.type) {
       case 'sessions':
         lastSessionListTimestamps.set(_machine.pubkeyHex, event.created_at);
-        onSessionList?.({ machine: msg.machine, sessions: msg.sessions, authStatus: msg.authStatus, protocolVersion: msg.protocolVersion });
+        onSessionList?.({ machine: msg.machine, sessions: msg.sessions, authStatus: msg.authStatus, protocolVersion: msg.protocolVersion, folders: msg.folders });
         // Fresh session list = bridge is alive
         onStatus?.(_machine.hostname, 'connected');
         break;

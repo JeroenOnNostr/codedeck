@@ -2,6 +2,41 @@
 
 ## GSD integration
 
+- [ ] **CD-059: the Project folder picker listed the workspace, not the projects in it** — ✅ code +
+  tests done, **device-verify owed**. The dropdown was fed by `machineSessions.map(s => s.project)`
+  — the folder names of sessions already running — so on a workspace where every session starts at
+  the root it offered a single entry: *"VScode workspace for building nostr apps"*. Choosing a
+  project meant typing its folder name from memory, on a phone, which is the one place that is
+  hardest to do.
+
+  It now reads the real listing a **v9** bridge sends with the session list (CDB-035), stored per
+  machine as `machineFolders` next to `machineProtocolVersion` and pruned with the machine.
+  `orderProjectFolders()` floats folders that already host a session to the top of the workspace
+  list — the likeliest next pick — and falls back to exactly the old list when the bridge sends
+  none, so an un-upgraded bridge loses nothing. "Create it if it doesn't exist" now only appears for
+  a name the workspace listing doesn't already contain; for a folder the bridge just said exists it
+  was a question about nothing. Field and hint unchanged otherwise: still free text, because typing
+  a new folder name is how CD-058 starts a project. 131 tests (+5).
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Bridge on the laptop rebuilt with CDB-035 and the window reloaded (a v8 bridge
+  sends no folders and the picker correctly stays as it was). Phone on this build
+  (`./dev.sh android-build`, `adb install -r` to **comet**). Paired to Framework.
+
+  **Steps.**
+  1. Open **New Session** on the Framework machine, tap **Project folder**.
+  2. Type `nostr`, then clear it and type `not-a-real-folder`.
+  3. Clear again, pick `yenn` from the list, tap **Start Session**.
+
+  **Pass oracle.** (a) Step 1 shows the real folders — `atna`, `codedeck`, `gantry`, `yenn`, … —
+  **replacing the pre-fix single entry naming the workspace root**; step 2 narrows to
+  `nostr-relays` and its nested projects. (b) The **"Create it if it doesn't exist"** checkbox is
+  absent while a listed folder is typed and appears for `not-a-real-folder`. (c) After step 3 the
+  session opens rooted in `yenn`: the session card's project reads `yenn`, and the GSD strip
+  reflects yenn's own `.planning/` rather than the workspace root's.
+  </details>
+
 - [x] **CD-058: you could not actually start a GSD project from the phone** — ✅ code + tests done,
   **device-verified 2026-07-28** (`docs/CD-058-GSD-DEVICE-VERIFY-RESULTS.md`). Everything CD-052…057
   built was reachable only by a route nobody would find, and it dead-ended:

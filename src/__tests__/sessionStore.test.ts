@@ -6,7 +6,7 @@ import {
   fireGsdKickoff,
   cancelGsdKickoff,
 } from '../stores/sessionStore';
-import { sanitizeProjectFolder } from '../components/NewSessionModal';
+import { sanitizeProjectFolder, orderProjectFolders } from '../components/NewSessionModal';
 import { OutputEntry, RemoteMachine, RemoteSessionInfo } from '../types';
 
 function makeEntry(overrides: Partial<OutputEntry> = {}): OutputEntry {
@@ -520,6 +520,63 @@ describe('sanitizeProjectFolder', () => {
 
   it('drops characters a shell or path would treat specially', () => {
     expect(sanitizeProjectFolder('rm -rf $HOME; echo')).toBe('rm--rf-HOME-echo');
+  });
+});
+
+/**
+ * CD-059 — the Project folder picker used to be fed by the folder names of running sessions, which
+ * on a workspace where every session starts at the root is one entry naming the root itself.
+ */
+describe('orderProjectFolders', () => {
+  const workspace = ['atna', 'codedeck', 'nostr-relays/rocket-relay', 'yenn'];
+
+  it('offers the whole workspace, not just folders that already have a session', () => {
+    expect(orderProjectFolders(workspace, ['codedeck'])).toEqual([
+      'codedeck', 'atna', 'nostr-relays/rocket-relay', 'yenn',
+    ]);
+  });
+
+  it('floats folders with a running session to the top, order otherwise preserved', () => {
+    expect(orderProjectFolders(workspace, ['yenn', 'atna'])).toEqual([
+      'atna', 'yenn', 'codedeck', 'nostr-relays/rocket-relay',
+    ]);
+  });
+
+  it('ignores active projects that are not workspace folders', () => {
+    // e.g. a session rooted somewhere the scan no longer reports — it must not be offered twice.
+    const out = orderProjectFolders(workspace, ['gone']);
+    expect(out).toEqual(workspace);
+  });
+
+  it('falls back to the session-derived list when the bridge sent none (pre-v9)', () => {
+    expect(orderProjectFolders([], ['codedeck', 'codedeck'])).toEqual(['codedeck']);
+    expect(orderProjectFolders([], [])).toEqual([]);
+  });
+});
+
+describe('sessionStore — workspace folders from the session list', () => {
+  const machine: RemoteMachine = {
+    npub: 'npub1folders', pubkeyHex: 'ff'.repeat(32), hostname: 'framework',
+    relays: ['wss://relay.example'], connected: true,
+  };
+
+  beforeEach(() => {
+    useSessionStore.setState({ machines: [machine], machineFolders: {}, machineProtocolVersion: {} });
+  });
+
+  it('removeMachine drops the machine-scoped folder list and protocol version', () => {
+    // These describe a workspace and a bridge the phone is no longer paired to; left behind, an
+    // unpaired machine's folders would show up in the next machine's picker.
+    useSessionStore.setState({
+      machineFolders: { [machine.pubkeyHex]: ['yenn'], other: ['elsewhere'] },
+      machineProtocolVersion: { [machine.pubkeyHex]: 9, other: 8 },
+    });
+    useSessionStore.getState().removeMachine(machine.pubkeyHex);
+    const state = useSessionStore.getState();
+    expect(state.machineFolders[machine.pubkeyHex]).toBeUndefined();
+    expect(state.machineProtocolVersion[machine.pubkeyHex]).toBeUndefined();
+    expect(state.machineFolders.other).toEqual(['elsewhere']);
+    expect(state.machineProtocolVersion.other).toBe(8);
   });
 });
 

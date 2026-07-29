@@ -263,7 +263,11 @@ export interface GsdState {
 }
 
 export type BridgeInboundMessage =
-  | { type: 'sessions'; machine: string; sessions: RemoteSessionInfo[]; authStatus?: AuthStatus; protocolVersion?: number }
+  /** `folders`: the workspace's project folders, relative to its root (e.g. `yenn`,
+   *  `nostr-relays/rocket-relay`) — each one a valid `create-session.cwd`. Sent by v9+ bridges;
+   *  absent means the bridge can't enumerate them, and the picker falls back to the folder names
+   *  of sessions already running (CD-059). */
+  | { type: 'sessions'; machine: string; sessions: RemoteSessionInfo[]; authStatus?: AuthStatus; protocolVersion?: number; folders?: string[] }
   | { type: 'output'; sessionId: string; seq: number; entry: RemoteOutputEntry }
   | { type: 'history'; sessionId: string; entries: Array<{ seq: number; entry: RemoteOutputEntry }>; totalEntries: number; fromSeq: number; toSeq: number; chunkIndex?: number; totalChunks?: number; requestId?: string }
   | { type: 'session-pending'; pendingId: string; machine: string; createdAt: string }

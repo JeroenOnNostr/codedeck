@@ -5,6 +5,28 @@ import { MODELS, DEFAULT_MODEL } from '../constants/models';
 import '../styles/modal.css';
 import '../styles/gsd.css';
 
+/**
+ * Options for the Project folder picker, best-first (CD-059).
+ *
+ * `folders` is the bridge's listing of the workspace (protocol v9+); `activeProjects` are the
+ * folder names of sessions already running on that machine. Before v9 the picker had only the
+ * latter — and since every session used to start at the workspace root, that was a list of one
+ * entry naming the root itself, i.e. no picker at all. So the bridge list leads, and the folders
+ * that already host a session float to the top of it, because "the project I was just in" is the
+ * likeliest next pick and typing on a phone is expensive.
+ *
+ * Returns `activeProjects` unchanged when the bridge sent nothing: an older bridge keeps exactly
+ * the behaviour it has today rather than losing the little it offered.
+ */
+export function orderProjectFolders(folders: string[], activeProjects: string[]): string[] {
+  if (folders.length === 0) return [...new Set(activeProjects)];
+  const active = new Set(activeProjects);
+  return [
+    ...folders.filter((f) => active.has(f)),
+    ...folders.filter((f) => !active.has(f)),
+  ];
+}
+
 /** Folder name → a path the bridge will accept: no separators, no traversal, no leading dots. */
 export function sanitizeProjectFolder(raw: string): string {
   return raw
@@ -26,6 +48,7 @@ export default function NewSessionModal() {
   const remoteSessions = useSessionStore((s) => s.remoteSessions);
   const defaultModel = useSessionStore((s) => s.config.model);
   const machineProtocolVersion = useSessionStore((s) => s.machineProtocolVersion);
+  const machineFolders = useSessionStore((s) => s.machineFolders);
   const remoteSessionGsd = useSessionStore((s) => s.remoteSessionGsd);
   const [name, setName] = useState('');
   const [group, setGroup] = useState('');
@@ -61,6 +84,11 @@ export default function NewSessionModal() {
         .filter(Boolean)
         .filter(p => p !== 'Waiting for Claude Code...' && p !== 'Starting session…'),
     )];
+
+    // The real workspace listing (v9+ bridges). `projects` stays what it always was — the
+    // "Workspace" info line — but is no longer asked to stand in for a folder list (CD-059).
+    const workspaceFolders = machineFolders[machine.pubkeyHex] ?? [];
+    const folderOptions = orderProjectFolders(workspaceFolders, projects);
 
     // CDB-033 landed in bridge protocol v8. Older bridges drop `cwd` without a word.
     const supportsProjectDir = (machineProtocolVersion[machine.pubkeyHex] ?? 0) >= 8;
@@ -105,7 +133,11 @@ export default function NewSessionModal() {
     };
 
     // Only meaningful once a folder is named, and only offered if the bridge can honour it.
-    const isNewProject = supportsProjectDir && projectDir.trim().length > 0;
+    // With a real folder list (v9+) the offer narrows to names that aren't in it: for a folder the
+    // bridge just told us exists, "create it if it doesn't exist" is a question about nothing.
+    const namedFolder = projectDir.trim();
+    const isNewProject = supportsProjectDir && namedFolder.length > 0
+      && (workspaceFolders.length === 0 || !workspaceFolders.includes(namedFolder));
 
     return (
       <div className="modal-overlay bottom-sheet" onClick={close}>
@@ -211,7 +243,7 @@ export default function NewSessionModal() {
                     spellCheck={false}
                   />
                   <datalist id="project-dirs">
-                    {projects.map((p) => <option key={p} value={p} />)}
+                    {folderOptions.map((p) => <option key={p} value={p} />)}
                   </datalist>
                   {isNewProject && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
@@ -222,9 +254,11 @@ export default function NewSessionModal() {
                 </>
               )}
               <p className="modal-hint" style={{ marginBottom: 24 }}>
-                {supportsProjectDir
-                  ? `Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the workspace root, or name a subdirectory to root the session in one project — tools that read the session's directory, GSD above all, then see that project instead of the whole workspace. Session name is assigned automatically.`
-                  : `Opens a new Claude Code terminal in the VSCode workspace. Session name and project are assigned automatically. Update the bridge to choose a project folder for the session.`}
+                {!supportsProjectDir
+                  ? `Opens a new Claude Code terminal in the VSCode workspace. Session name and project are assigned automatically. Update the bridge to choose a project folder for the session.`
+                  : workspaceFolders.length > 0
+                    ? `Opens a new Claude Code terminal in the VSCode workspace. Tap the field to pick from its ${workspaceFolders.length} project folders, or leave it blank for the workspace root — tools that read the session's directory, GSD above all, then see that one project instead of the whole workspace. Session name is assigned automatically.`
+                    : `Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the workspace root, or name a subdirectory to root the session in one project — tools that read the session's directory, GSD above all, then see that project instead of the whole workspace. Session name is assigned automatically.`}
               </p>
 
               <label className="modal-label">Model</label>
