@@ -24,17 +24,66 @@
   sends no folders and the picker correctly stays as it was). Phone on this build
   (`./dev.sh android-build`, `adb install -r` to **comet**). Paired to Framework.
 
-  **Steps.**
+  **Steps.** (Updated for the CD-060 select — the field no longer filters as you type.)
   1. Open **New Session** on the Framework machine, tap **Project folder**.
-  2. Type `nostr`, then clear it and type `not-a-real-folder`.
-  3. Clear again, pick `yenn` from the list, tap **Start Session**.
+  2. Scroll the picker; then choose **Other** and type `not-a-real-folder`.
+  3. Re-open the picker, choose `yenn`, tap **Start Session**.
 
-  **Pass oracle.** (a) Step 1 shows the real folders — `atna`, `codedeck`, `gantry`, `yenn`, … —
-  **replacing the pre-fix single entry naming the workspace root**; step 2 narrows to
-  `nostr-relays` and its nested projects. (b) The **"Create it if it doesn't exist"** checkbox is
-  absent while a listed folder is typed and appears for `not-a-real-folder`. (c) After step 3 the
-  session opens rooted in `yenn`: the session card's project reads `yenn`, and the GSD strip
-  reflects yenn's own `.planning/` rather than the workspace root's.
+  **Pass oracle.** (a) Step 1 lists the real folders — `atna`, `codedeck`, `gantry`, `yenn`,
+  `nostr-relays/rocket-relay`, … (45 on this workspace) — **replacing the pre-fix single entry
+  naming the workspace root**. (b) The **"Create it if it doesn't exist"** checkbox is absent for
+  the listed folders and appears for `not-a-real-folder`. (c) After step 3 the session opens rooted
+  in `yenn`: the session card's project reads `yenn`, and the GSD strip reflects yenn's own
+  `.planning/` rather than the workspace root's.
+  </details>
+
+- [ ] **CD-060: the folder picker was a datalist, so it painted over the form and hid its own
+  options** — ✅ code + tests done, **device-verify owed**. CD-059 filled the picker with the real
+  workspace, but the field was an `<input list="project-dirs">`, and the WebView renders a
+  datalist's suggestions as a floating popup: on the phone it appeared *over the "PROJECT FOLDER"
+  label above it*, and it only ever showed what the typed prefix matched — a picker you have to
+  already know the answer to use, which is the same problem CD-059 set out to remove. With 45
+  folders it was also unusable as a scroll list.
+
+  It is a `<select>` now — the phone's own full-screen picker, every folder in it before a key is
+  pressed — with `workspace root` first and an `Other — type a folder name…` sentinel last that
+  reveals the old text input, because typing a folder that doesn't exist yet is how CD-058 starts a
+  project. `resolveProjectFolder(selection, typed)` is the one place that decides what `cwd` gets
+  sent, so a draft name abandoned under "Other" can't leak into a session rooted elsewhere. The
+  free-text field still stands alone when there is nothing to list at all.
+
+  Second half of the fix is diagnostic: a bridge on **v8** honours `cwd` but can't list folders, and
+  that was indistinguishable on the phone from a workspace with no projects in it — the picker was
+  just empty and the hint explained neither. It now names the cause ("this machine's bridge is too
+  old to list the workspace's project folders"). **This is what cost a release cycle**: CD-059
+  shipped to the phone while the laptop still ran the v8 bridge, and nothing on screen said so.
+  137 tests (+6).
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Laptop running bridge **2026.7.31** (protocol v9 — verify with
+  `unzip -p codedeck-bridge-2026.7.31.vsix extension/out/extension.js | grep -o 'PROTOCOL_VERSION *= *[0-9]*'`
+  before installing; the vsix that shipped with the 2026.7.31 release was built *before* CDB-035 and
+  still said 8) and the **window reloaded**. Phone on this build (`./dev.sh android-build`,
+  `adb install -r` to **comet**, `48101FDKD000MW`) — note it reports version `2026.07.31`, the same
+  as the *published* release, which does **not** contain CD-060; install from
+  `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`, not from
+  the `CodeDeck-v2026.07.31-android.apk` in the repo root, and bump the version before any publish.
+  Paired to Framework.
+
+  **Steps.**
+  1. Open **New Session** on Framework and tap **Project folder**.
+  2. Pick `yenn`, then re-open and pick **Other**, type `brand-new-thing`.
+  3. Re-open and pick **workspace root**, tap **Start Session**.
+
+  **Pass oracle.** (a) Step 1 opens the **native full-screen picker**, and the "PROJECT FOLDER"
+  label stays readable — **the pre-fix symptom is a floating suggestion box drawn on top of that
+  label**, with a single entry in it. (b) Step 2's "Other" reveals a text field, and "Create it if
+  it doesn't exist" appears for `brand-new-thing` and not for `yenn`. (c) Step 3's session opens at
+  the workspace root — i.e. the abandoned `brand-new-thing` draft was **not** sent as the cwd and no
+  such directory exists on the laptop (`ls "$WORKSPACE"/brand-new-thing` → no such file). (d) With
+  the **2026.7.30** bridge reinstalled and the window reloaded, the hint reads "this machine's
+  bridge is too old to list the workspace's project folders" instead of the generic blurb.
   </details>
 
 - [x] **CD-058: you could not actually start a GSD project from the phone** — ✅ code + tests done,
@@ -74,10 +123,154 @@
   session on `gsd-testbed` (5-phase roadmap, 1 phase planned) and confirm the strip reads
   **Phase 1/5 · 20%**, not `Phase 1/1 · 100%`.
 
+## Pairing & settings cleanup
+
+- [ ] **CD-064: auto-scroll fought the user mid-drag in the output stream** — ✅ code + tests done,
+  **device-verify owed**. Scrolling back through old output would yank the viewport to the newest
+  message. Three separate faults: `autoScrollRef` was mirrored from state during render, so a
+  ResizeObserver firing in the same frame as a scroll event read a stale `true`; re-arming keyed on
+  "is at bottom" alone, which a row re-measured shorter makes true by shrinking `scrollHeight` while
+  the user is parked in old output; and the scroll listener was attached in an effect with only
+  stable deps while the List mounts conditionally, so a session that started empty never got a
+  listener and stayed latched on forever. Touch/wheel now hold a guard for 200ms after events stop
+  so a fling is not fought by its own momentum. Decision logic is DOM-free in `outputScroll.ts` —
+  jsdom has no layout, so real scroll geometry can only be exercised there.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** CodeDeck `2026.8.4` on **comet**, paired to a machine with a session holding
+  several screens of output and an agent actively streaming (ask it something long).
+
+  **Steps.**
+  1. While output is streaming, drag back up into old output and hold the finger still.
+  2. Release into a fling upward, let it coast to a stop.
+  3. Scroll back down to the bottom by hand.
+  4. Tap the **New output** pill while parked in old output.
+  5. Open a session that has *no* output yet, then make it produce some.
+
+  **Pass oracle.** (a) Steps 1-2: the viewport stays where the user put it for as long as they are
+  reading — **replacing the pre-fix behaviour where it snapped to the newest message mid-drag and
+  mid-fling**. (b) Step 3: reaching the bottom resumes following the stream. (c) Step 4: the pill
+  jumps to the bottom and re-arms. (d) Step 5: a session that started empty still follows the
+  stream — pre-fix it never attached a listener, so it was latched on and could not be scrolled
+  away from.
+  </details>
+
+- [ ] **CD-061: a phone with no camera could not pair at all** — ✅ code + tests done,
+  **device-verify owed**. The bridge hands out one `codedeck://pair?...` URL, but the app only ever
+  consumed it through the OS deep-link handler — i.e. only by scanning the QR. There is no barcode
+  dependency and no CAMERA permission in the app; scanning is delegated entirely to the phone's
+  camera app. So a phone whose camera doesn't work had no way in.
+
+  The only manual path took a **bridge npub + machine name**, and that path *cannot pair*: a
+  pair-request needs the one-time `token` that exists only in the URL, so a hand-added machine
+  stayed one-way and permanently disconnected unless the user also walked over to the desktop and
+  pasted the phone's npub into the bridge's own manual form.
+
+  `handleDeepLink` was already a complete parser, just trapped in `App.tsx` behind the deep-link
+  event. It moves to `services/pairingLink.ts` with typed results, and Settings → Remote Machines
+  gets a **Pairing link** field fed by it. Scanning is unchanged — both entry points now run the
+  same code. The npub form moves under an *Advanced — add by npub* disclosure that says plainly why
+  it can't pair alone. `extractPairingUrl` tolerates what a link survives on the way to a phone:
+  prose prefixes, wrapping newlines, glued-on sentence punctuation.
+
+  Pairing failure is visible now too. A rejection was `console.warn`-only and an expired window
+  produced no ack at all, so a stale link looked exactly like a working one that hadn't connected
+  yet. `pairToast` carries `{ ok, message }`, `bad-token` maps to "Pairing link expired", and a 20s
+  no-response timer covers the silent case. Needs bridge **CDB-039** for the Copy button. 159 tests
+  (+13).
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Bridge rebuilt with CDB-039 (`npm run build` in `codedeck-bridge-vscode/`) and
+  the VSCode window reloaded. Phone on this build (`./dev.sh android-build`, `adb install -r` to
+  **comet**). Start from the phone's Settings → Remote Machines with the target machine **removed**,
+  so pairing runs from scratch.
+
+  **Steps.**
+  1. In VSCode run **Codedeck: Pair phone**. Confirm the URL box still shows `&mesh=…` redacted and
+     a **Copy pairing link** button is present; click it.
+  2. Paste the clipboard into a scratch buffer and confirm it holds the *full* URL — a real `mesh=`
+     value and a `token=`, not an ellipsis.
+  3. Send that link to the phone (any chat app), paste it into **Settings → Remote Machines →
+     Pairing link**, tap **Link machine**.
+  4. Prefix a second copy with `Here you go: ` and a trailing newline; confirm it still links.
+  5. Close the Pair phone tab in VSCode, then paste the link again.
+  6. Open a *new* pairing panel (fresh token) and paste the *old* link.
+  7. Paste `hello` into the field.
+  8. Scan a fresh QR with the phone camera as before.
+
+  **Pass oracle.** (a) Step 3 shows a green `✓ Connected to {machine}` toast and the machine's dot
+  goes green — **replacing the pre-fix behaviour where no paste field existed at all and an
+  npub-added machine sat disconnected forever**; the VSCode panel flips to its "Phone paired!" box.
+  (b) Step 5 produces a **red** toast *"No response from {machine} — is the Pair phone tab still
+  open in VSCode?"* within ~20s, not silence. (c) Step 6 produces a red *"Pairing link expired —
+  generate a new one in VSCode."* (d) Step 7 shows inline *"Not a Codedeck pairing link."* (e) Step
+  8 pairs exactly as before, proving the App.tsx extraction was faithful.
+  </details>
+
+- [ ] **CD-062: remove voice mode** — ✅ code + tests done, **device-verify owed**. Never used, and
+  not cheap to keep: a vendored `tauri-plugin-speech-recognizer`, `tauri-plugin-tts`, and — the part
+  that actually matters — an Android `RECORD_AUDIO` permission on an app that never listened. Out go
+  the settings section, the header speaker toggle, the dictation mic buttons in the input bar and DM
+  view, seven frontend modules, the whole plugin directory, both capability entries and the CSS.
+
+  Deliberately kept: `pingSound.ts` (Web Audio notification ping — its `unlock`/AudioContext calls
+  read as audio code but are unrelated) and the sessionStore actions `useVoiceMode` called, which
+  PermissionBar / GsdStageBar / InputBar also use.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Fresh APK from `./dev.sh android-build` installed to **comet**.
+
+  **Steps.**
+  1. Open Settings and scroll the whole modal.
+  2. Open a session; look at the header and the input bar.
+  3. Open a DM conversation; look at the input row.
+  4. On the host: `"$ANDROID_HOME"/build-tools/*/aapt dump permissions <apk> | grep -i RECORD_AUDIO`
+  5. Send a message in a session and answer a permission prompt.
+
+  **Pass oracle.** (a) No **Voice Mode** section anywhere in Settings. (b) No speaker button in the
+  session header and no mic button in either input row — **replacing the pre-fix UI where both were
+  present**. (c) Step 4 prints nothing (pre-fix it printed `RECORD_AUDIO`). (d) Step 5 still works,
+  proving the shared sessionStore actions survived the hook's removal.
+  </details>
+
+- [ ] **CD-063: remove the Authentication settings section** — ✅ code + tests done,
+  **device-verify owed**. Closes **CD-002** (the API key test had no timeout — the test is gone) and
+  delivers **CD-019** together with CD-062. Anthropic API key, GitHub PAT and GitHub username: never
+  used, because remote sessions run Claude Code on the paired machine and authenticate there. Out go
+  the section, the Send Key / Update Key button and the "No API key" line (both read the key field
+  and would have been permanently dead once it went), `test_api_key`, `sendSetCredentials`, the three
+  `AppConfig` fields on both sides, `stripSecrets`, `FullConfig`, and — with its last caller gone —
+  Stronghold itself.
+
+  **Behaviour change:** local (non-bridge) sessions now read `ANTHROPIC_API_KEY` from the
+  environment instead of Stronghold. Remote sessions are unaffected. Existing installs keep an
+  orphaned Stronghold vault and `salt.txt` on disk; nothing reads them. A regression test covers a
+  `config.json` from an older install still carrying the three removed keys.
+
+  <details><summary>Device-verification run-sheet</summary>
+
+  **Preconditions.** Same APK as CD-062, installed over an **existing** install (not a fresh one) so
+  the old `config.json` and Stronghold vault are present — that is the migration case under test.
+
+  **Steps.**
+  1. Open Settings and scroll the whole modal.
+  2. Look at a paired machine's row under Remote Machines.
+  3. Change **Default Mode** and **Model**, tap Save, force-stop the app, reopen Settings.
+
+  **Pass oracle.** (a) No **Authentication** section — **replacing the pre-fix UI with API key, PAT
+  and username fields**. (b) A machine row shows only name + connection dot + **Remove**; no
+  Send Key / Update Key button and no "No API key" line. (c) Step 3's settings survive the restart,
+  proving the old config.json with its three stale keys still deserializes rather than resetting to
+  defaults.
+  </details>
+
 ## Bugs
 
 - [ ] **CD-001: processGiftWrap swallows exceptions silently** — `nostrService.ts:169` — NIP-17 gift-wrap decryption failures return `null` with minimal logging, making DM debugging hard. Added `console.warn` but could surface to UI.
-- [ ] **CD-002: SettingsModal API key test has no timeout** — `SettingsModal.tsx:43-60` — `handleTestApiKey()` calls `api.testApiKey()` with no timeout mechanism. If the network hangs, the UI shows "Testing..." indefinitely.
+- [x] **CD-002: SettingsModal API key test has no timeout** — moot, closed by CD-063 (the API key field and its Test button are gone). Original: — `SettingsModal.tsx:43-60` — `handleTestApiKey()` calls `api.testApiKey()` with no timeout mechanism. If the network hangs, the UI shows "Testing..." indefinitely.
 - [ ] **CD-003: App.tsx deep link errors silently swallowed** — `App.tsx:74-79` — `getCurrent()` and `onOpenUrl()` promise rejections are caught with empty `.catch(() => {})`. If deep link init fails, pairing via QR code won't work with no feedback.
 
 ## Notifications (v0.6.5)
@@ -102,7 +295,7 @@
 
 - [ ] **CD-015: Option to move session column to right side** — Add a setting to move the left session sidebar to the right-hand side of the screen.
 - [ ] **CD-017: Remove local sessions functionality** — Strip out local session support; Codedeck should only handle remote/bridge sessions.
-- [ ] **CD-019: Clean up settings menu** — Audit SettingsModal for unused or obsolete options and remove them.
+- [ ] **CD-019: Clean up settings menu** — Audit SettingsModal for unused or obsolete options and remove them. Voice Mode (CD-062) and Authentication (CD-063) are done; re-audit what is left.
 
 ## Reviews & Fixes
 
