@@ -43,9 +43,6 @@ export interface OutputEntry {
 }
 
 export interface AppConfig {
-  anthropic_api_key: string | null;
-  github_pat: string | null;
-  github_username: string | null;
   default_mode: AgentMode;
   default_effort: EffortLevel;
   auto_push_on_complete: boolean;

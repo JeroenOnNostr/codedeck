@@ -5,8 +5,6 @@ import { useDmStore } from '../stores/dmStore';
 import { useQuickPromptStore } from '../stores/quickPromptStore';
 import { AppConfig, AgentMode, EffortLevel, RemoteMachine } from '../types';
 import { parsePrivateKey, getPubkeyHex, parsePublicKey } from '../services/nostrService';
-import { api } from '../ipc/tauri';
-import { sendSetCredentials } from '../services/bridgeService';
 import { applyPairingLink, extractPairingUrl } from '../services/pairingLink';
 import { MODELS, DEFAULT_MODEL } from '../constants/models';
 import * as nip19 from 'nostr-tools/nip19';
@@ -37,9 +35,6 @@ export default function SettingsModal() {
   const initBridgeService = useSessionStore((s) => s.initBridgeService);
 
   const [local, setLocal] = useState<AppConfig>(config || {
-    anthropic_api_key: null,
-    github_pat: null,
-    github_username: null,
     default_mode: 'plan' as AgentMode,
     default_effort: 'auto' as EffortLevel,
     auto_push_on_complete: true,
@@ -53,14 +48,10 @@ export default function SettingsModal() {
     show_model_badge: true,
     show_usage_badge: true,
   });
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [showPat, setShowPat] = useState(false);
   const [showNsec, setShowNsec] = useState(false);
   const [nostrKey, setNostrKey] = useState(nostrConfig.private_key_hex || '');
   const [relayList, setRelayList] = useState(nostrConfig.relays.join('\n'));
   const [blossomServer, setBlossomServer] = useState(nostrConfig.blossomServer || '');
-  const [apiKeyStatus, setApiKeyStatus] = useState<'idle' | 'testing' | 'valid' | 'invalid'>('idle');
-  const [apiKeyError, setApiKeyError] = useState('');
   const [newMachineNpub, setNewMachineNpub] = useState('');
   const [newMachineName, setNewMachineName] = useState('');
   const [machineError, setMachineError] = useState('');
@@ -88,28 +79,6 @@ export default function SettingsModal() {
     }
     setSettingsOpen(false);
   }, [isDirty, setSettingsOpen]);
-
-  const handleTestApiKey = async () => {
-    const key = local.anthropic_api_key?.trim();
-    if (!key) return;
-    setApiKeyStatus('testing');
-    setApiKeyError('');
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout — check your connection')), 10000),
-    );
-    try {
-      const result = await Promise.race([api.testApiKey(key), timeout]);
-      if (result) {
-        setApiKeyStatus('valid');
-      } else {
-        setApiKeyStatus('invalid');
-        setApiKeyError('No response from API');
-      }
-    } catch (e: unknown) {
-      setApiKeyStatus('invalid');
-      setApiKeyError(String(e instanceof Error ? e.message : e) || 'Unknown error');
-    }
-  };
 
   useEffect(() => {
     if (config) setLocal(config);
@@ -243,73 +212,6 @@ export default function SettingsModal() {
           </button>
         </div>
 
-        {/* Authentication */}
-        <div className="modal-section">
-          <h3 className="modal-section-title">Authentication</h3>
-
-          <label className="modal-label">Anthropic API Key</label>
-          <div className="input-with-toggle" style={{ marginBottom: 4 }}>
-            <input
-              className="modal-input"
-              type={showApiKey ? 'text' : 'password'}
-              value={local.anthropic_api_key || ''}
-              onChange={(e) => {
-                setLocal({ ...local, anthropic_api_key: e.target.value || null });
-                setApiKeyStatus('idle');
-                setApiKeyError('');
-              }}
-              placeholder="sk-ant-api03-... or sk-ant-oat01-..."
-            />
-            <button className="show-hide-btn" onClick={() => setShowApiKey(!showApiKey)}>
-              {showApiKey ? 'Hide' : 'Show'}
-            </button>
-            <button
-              className="show-hide-btn"
-              onClick={handleTestApiKey}
-              disabled={apiKeyStatus === 'testing' || !local.anthropic_api_key}
-              style={{ marginLeft: 4 }}
-            >
-              {apiKeyStatus === 'testing' ? '...' : 'Test'}
-            </button>
-          </div>
-          <div style={{ fontSize: 11, padding: '0 0 12px', minHeight: 16 }}>
-            {apiKeyStatus === 'testing' && (
-              <span style={{ color: 'var(--text-muted)' }}>Testing API key...</span>
-            )}
-            {apiKeyStatus === 'valid' && (
-              <span style={{ color: '#22c55e' }}>Valid</span>
-            )}
-            {apiKeyStatus === 'invalid' && (
-              <span style={{ color: '#ef4444' }}>{apiKeyError || 'Invalid key'}</span>
-            )}
-            {apiKeyStatus === 'idle' && !local.anthropic_api_key && (
-              <span style={{ color: 'var(--text-muted)' }}>Required for agent sessions</span>
-            )}
-          </div>
-
-          <label className="modal-label">GitHub Personal Access Token</label>
-          <div className="input-with-toggle" style={{ marginBottom: 16 }}>
-            <input
-              className="modal-input"
-              type={showPat ? 'text' : 'password'}
-              value={local.github_pat || ''}
-              onChange={(e) => setLocal({ ...local, github_pat: e.target.value || null })}
-              placeholder="ghp_..."
-            />
-            <button className="show-hide-btn" onClick={() => setShowPat(!showPat)}>
-              {showPat ? 'Hide' : 'Show'}
-            </button>
-          </div>
-
-          <label className="modal-label">GitHub Username</label>
-          <input
-            className="modal-input"
-            value={local.github_username || ''}
-            onChange={(e) => setLocal({ ...local, github_username: e.target.value || null })}
-            placeholder="username"
-          />
-        </div>
-
         {/* Preferences */}
         <div className="modal-section">
           <h3 className="modal-section-title">Preferences</h3>
@@ -428,23 +330,8 @@ export default function SettingsModal() {
                   <span className={`dm-connection-dot ${m.connected ? 'connected' : 'disconnected'}`} style={{ marginRight: 6 }} />
                   {m.hostname}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {m.authStatus?.hasAnthropicKey
-                    ? (m.authStatus.hasEnvKey ? 'API key: env var' : 'API key: configured')
-                    : 'No API key'}
-                </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  className="show-hide-btn"
-                  onClick={async () => {
-                    const key = local.anthropic_api_key?.trim();
-                    if (!key) { alert('Enter an API key in the Authentication section first.'); return; }
-                    await sendSetCredentials(m, key, local.github_pat?.trim() || null);
-                  }}
-                >
-                  {m.authStatus?.hasAnthropicKey ? 'Update Key' : 'Send Key'}
-                </button>
                 <button
                   className="show-hide-btn"
                   onClick={() => removeMachine(m.pubkeyHex)}

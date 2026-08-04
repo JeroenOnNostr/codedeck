@@ -3,7 +3,6 @@ mod agent;
 mod config;
 
 use session::{AppState, SessionState, AgentMode};
-use config::FullConfig;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -16,94 +15,6 @@ type SharedState = Arc<AppState>;
 type AgentCancellations = Arc<Mutex<HashMap<String, CancellationToken>>>;
 /// Maps session_id -> JoinHandle for running agent tasks (A5: monitor for panics)
 type AgentHandles = Arc<Mutex<HashMap<String, JoinHandle<()>>>>;
-
-/// Read a secret from Stronghold's unencrypted store.
-/// Returns None if the key doesn't exist or Stronghold isn't available.
-fn stronghold_get(app: &tauri::AppHandle, key: &str) -> Option<String> {
-    use tauri_plugin_stronghold::stronghold::Stronghold;
-
-    let stronghold = app.try_state::<Stronghold>()?;
-    let client = stronghold.get_client("codedeck").ok()?;
-    let store = client.store();
-    let data = store.get(key.as_bytes()).ok()?;
-    data.map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-}
-
-/// Write a secret to Stronghold's unencrypted store.
-fn stronghold_set(app: &tauri::AppHandle, key: &str, value: &str) -> Result<(), String> {
-    use tauri_plugin_stronghold::stronghold::Stronghold;
-
-    let stronghold = app.state::<Stronghold>();
-    let client = stronghold.get_client("codedeck")
-        .or_else(|_| stronghold.create_client("codedeck"))
-        .map_err(|e| format!("Stronghold client error: {}", e))?;
-    let store = client.store();
-    store.insert(key.as_bytes().to_vec(), value.as_bytes().to_vec(), None)
-        .map_err(|e| format!("Stronghold insert error: {}", e))?;
-    stronghold.save()
-        .map_err(|e| format!("Stronghold save error: {}", e))?;
-    Ok(())
-}
-
-/// Delete a secret from Stronghold's store.
-fn stronghold_delete(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
-    use tauri_plugin_stronghold::stronghold::Stronghold;
-
-    let stronghold = app.try_state::<Stronghold>();
-    if let Some(stronghold) = stronghold {
-        if let Ok(client) = stronghold.get_client("codedeck") {
-            let store = client.store();
-            store.delete(key.as_bytes())
-                .map_err(|e| format!("Stronghold delete error: {}", e))?;
-            stronghold.save()
-                .map_err(|e| format!("Stronghold save error: {}", e))?;
-        }
-    }
-    Ok(())
-}
-
-/// One-time migration: move plaintext secrets from config.json to Stronghold.
-/// Reads config.json as raw JSON, extracts secret fields, writes them to
-/// Stronghold, then rewrites config.json without those fields.
-fn migrate_secrets_from_config(data_dir: &std::path::Path, app: &tauri::AppHandle) {
-    let config_path = data_dir.join("config.json");
-    if !config_path.exists() { return; }
-
-    let data = match std::fs::read_to_string(&config_path) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
-    let mut json: serde_json::Value = match serde_json::from_str(&data) {
-        Ok(j) => j,
-        Err(_) => return,
-    };
-
-    let mut migrated = false;
-    if let Some(key) = json.get("anthropic_api_key").and_then(|v| v.as_str()) {
-        if !key.is_empty() {
-            stronghold_set(app, "anthropic_api_key", key).ok();
-            migrated = true;
-        }
-    }
-    if let Some(pat) = json.get("github_pat").and_then(|v| v.as_str()) {
-        if !pat.is_empty() {
-            stronghold_set(app, "github_pat", pat).ok();
-            migrated = true;
-        }
-    }
-
-    if migrated {
-        // Remove secret fields from JSON and rewrite
-        if let Some(obj) = json.as_object_mut() {
-            obj.remove("anthropic_api_key");
-            obj.remove("github_pat");
-        }
-        if let Ok(cleaned) = serde_json::to_string_pretty(&json) {
-            std::fs::write(&config_path, cleaned).ok();
-        }
-        eprintln!("Migrated secrets from config.json to Stronghold encrypted storage");
-    }
-}
 
 #[tauri::command]
 async fn get_sessions(
@@ -266,14 +177,18 @@ async fn send_message(
     cancellations: tauri::State<'_, AgentCancellations>,
     handles: tauri::State<'_, AgentHandles>,
 ) -> Result<(), String> {
-    // Read API key from Stronghold encrypted storage
+    // Local (non-bridge) sessions authenticate from the environment. CD-063 removed
+    // the in-app key field, so this is the only source; remote sessions are unaffected
+    // because they run on the paired machine and use its credentials.
     let (api_key, model, workspace_path, mode) = {
-        let api_key = match stronghold_get(&app, "anthropic_api_key") {
-            Some(key) if !key.is_empty() => key,
+        let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+            Ok(key) if !key.trim().is_empty() => key,
             _ => {
                 let entry = session::OutputEntry {
                     entry_type: session::OutputType::Error,
-                    content: "No Anthropic API key configured. Go to Settings to add one.".into(),
+                    content: "No Anthropic API key found. Set ANTHROPIC_API_KEY in the environment \
+                              before starting CodeDeck, or run this session on a paired machine."
+                        .into(),
                     timestamp: chrono::Utc::now(),
                     metadata: None,
                 };
@@ -518,97 +433,24 @@ async fn git_pull(
     }
 }
 
-/// Test an Anthropic API key by making a minimal API call.
-/// The key is passed directly from the frontend (not read from Stronghold)
-/// so this works before the user has saved their settings.
-#[tauri::command]
-async fn test_api_key(
-    api_key: String,
-) -> Result<String, String> {
-    if api_key.trim().is_empty() {
-        return Err("No API key provided".into());
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
-
-    let body = serde_json::json!({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 1,
-        "messages": [{"role": "user", "content": "Hi"}]
-    });
-
-    let resp = agent::with_anthropic_auth(
-            client.post("https://api.anthropic.com/v1/messages"),
-            &api_key,
-        )
-        .header("anthropic-version", agent::streaming::ANTHROPIC_API_VERSION)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
-
-    let status = resp.status();
-    if status.is_success() {
-        Ok("Valid".into())
-    } else {
-        let text = resp.text().await.unwrap_or_default();
-        let msg = serde_json::from_str::<serde_json::Value>(&text)
-            .ok()
-            .and_then(|v| v.get("error")?.get("message")?.as_str().map(String::from))
-            .unwrap_or_else(|| format!("HTTP {}", status));
-        Err(msg)
-    }
-}
-
-/// Returns the full config including secrets (read from Stronghold).
-/// The FullConfig has the same JSON shape as the old AppConfig,
-/// so the frontend TypeScript interface requires no changes.
+/// Returns the application config.
 #[tauri::command]
 async fn get_config(
-    app: tauri::AppHandle,
     state: tauri::State<'_, SharedState>,
-) -> Result<FullConfig, String> {
+) -> Result<config::AppConfig, String> {
     let config = state.config.read().await;
-    let api_key = stronghold_get(&app, "anthropic_api_key");
-    let pat = stronghold_get(&app, "github_pat");
-    Ok(FullConfig::from_config_and_secrets(&config, api_key, pat))
+    Ok(config.clone())
 }
 
-/// Updates config — secrets go to Stronghold, non-secrets go to config.json.
+/// Updates the application config.
 #[tauri::command]
 async fn update_config(
-    config: FullConfig,
-    app: tauri::AppHandle,
+    config: config::AppConfig,
     state: tauri::State<'_, SharedState>,
 ) -> Result<(), String> {
-    // Save secrets to Stronghold encrypted storage
-    if let Some(ref key) = config.anthropic_api_key {
-        if !key.is_empty() {
-            stronghold_set(&app, "anthropic_api_key", key)?;
-        } else {
-            stronghold_delete(&app, "anthropic_api_key")?;
-        }
-    } else {
-        stronghold_delete(&app, "anthropic_api_key")?;
-    }
-    if let Some(ref pat) = config.github_pat {
-        if !pat.is_empty() {
-            stronghold_set(&app, "github_pat", pat)?;
-        } else {
-            stronghold_delete(&app, "github_pat")?;
-        }
-    } else {
-        stronghold_delete(&app, "github_pat")?;
-    }
-
-    // Save non-secret config to JSON
     {
         let mut cfg = state.config.write().await;
-        *cfg = config.to_app_config();
+        *cfg = config;
     }
     state.save_config().await.map_err(|e| e.to_string())
 }
@@ -624,20 +466,8 @@ pub fn run() {
         .plugin(tauri_plugin_mesh::init())
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
-            // Initialize Stronghold encrypted storage
-            let salt_path = app.path()
-                .app_local_data_dir()
-                .expect("could not resolve app local data path")
-                .join("salt.txt");
-            app.handle().plugin(
-                tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build()
-            )?;
-
             let data_dir = app.path().app_data_dir().expect("failed to get data dir");
             std::fs::create_dir_all(&data_dir).ok();
-
-            // Migrate any existing plaintext secrets to Stronghold
-            migrate_secrets_from_config(&data_dir, app.handle());
 
             let app_state = AppState::load(data_dir.clone()).unwrap_or_else(|e| {
                 eprintln!("Failed to load state: {}", e);
@@ -658,7 +488,6 @@ pub fn run() {
             set_mode,
             git_push,
             git_pull,
-            test_api_key,
             get_config,
             update_config,
         ])

@@ -234,9 +234,6 @@ interface SessionStore {
 }
 
 const defaultConfig: AppConfig = {
-  anthropic_api_key: null,
-  github_pat: null,
-  github_username: null,
   default_mode: 'plan',
   default_effort: 'auto',
   auto_push_on_complete: true,
@@ -252,11 +249,6 @@ const defaultConfig: AppConfig = {
 };
 
 const CONFIG_PERSIST_KEY = 'codedeck_config';
-
-/** Strip secret fields before persisting to localStorage / Tauri store. */
-function stripSecrets(config: AppConfig): AppConfig {
-  return { ...config, anthropic_api_key: null, github_pat: null };
-}
 
 /** Element-wise compare, so a value re-sent unchanged on every heartbeat isn't stored as new. */
 function arraysEqual(a: string[] | undefined, b: string[]): boolean {
@@ -866,17 +858,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({ config });
       return;
     }
-    // Browser-mode fallback: restore non-secret fields from persistStore.
+    // Browser-mode fallback: restore from persistStore.
     const saved = await persistGet<AppConfig>(CONFIG_PERSIST_KEY);
     if (saved) {
-      set({
-        config: {
-          ...defaultConfig,
-          ...saved,
-          anthropic_api_key: null,
-          github_pat: null,
-        },
-      });
+      set({ config: { ...defaultConfig, ...saved } });
     }
   },
 
@@ -1243,7 +1228,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   updateConfig: async (config) => {
     set({ config });
     if (isTauri()) await api.updateConfig(config);
-    persistSet(CONFIG_PERSIST_KEY, stripSecrets(config));
+    persistSet(CONFIG_PERSIST_KEY, config);
   },
 
   initEventListeners: async () => {

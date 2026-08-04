@@ -36,7 +36,6 @@ futures-util = "0.3"
 tokio-stream = "0.1"
 globset = "0.4"
 async-trait = "0.1"
-tauri-plugin-stronghold = "2"
 tauri-plugin-store = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
@@ -47,5 +46,3 @@ tauri-plugin-http = "2"
 # for arm64 and packaged by tauri-plugin-mesh's gradle cargo-ndk task, then loaded via JNI.
 tauri-plugin-mesh = { path = "../tauri-plugin-mesh" }
 
-[profile.dev.package.scrypt]
-opt-level = 3

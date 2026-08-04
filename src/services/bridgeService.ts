@@ -510,18 +510,6 @@ export async function sendRemoteImage(
   }
 }
 
-/**
- * Send API credentials to a bridge machine (NIP-44 encrypted).
- */
-export async function sendSetCredentials(
-  machine: RemoteMachine,
-  anthropicApiKey?: string | null,
-  githubPat?: string | null,
-): Promise<void> {
-  const msg: BridgeOutboundMessage = { type: 'set-credentials', anthropicApiKey, githubPat };
-  await publishToMachine(machine, msg);
-}
-
 /** Send the test-device config to the bridge (which device to target + how to build the app). */
 export async function sendSetDeviceConfig(
   machine: RemoteMachine,

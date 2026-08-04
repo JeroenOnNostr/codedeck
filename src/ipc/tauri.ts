@@ -58,7 +58,6 @@ export const api = {
   setMode: (sessionId: string, mode: AgentMode) => invoke('set_mode', { sessionId, mode }),
   gitPush: (sessionId: string) => invoke<string>('git_push', { sessionId }),
   gitPull: (sessionId: string) => invoke<string>('git_pull', { sessionId }),
-  testApiKey: (apiKey: string) => invoke<string>('test_api_key', { apiKey }),
   getConfig: () => invoke<AppConfig>('get_config'),
   updateConfig: (config: AppConfig) => invoke('update_config', { config }),
 };

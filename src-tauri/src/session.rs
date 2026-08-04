@@ -384,14 +384,14 @@ mod tests {
     fn persistence_save_load_config_roundtrip() {
         let (p, dir) = temp_persistence();
         let config = AppConfig {
-            github_username: Some("testuser".into()),
             model: "claude-opus-4-6".into(),
+            max_sessions: 7,
             ..AppConfig::default()
         };
         p.save_config(&config).unwrap();
         let loaded = p.load_config().unwrap();
-        assert_eq!(loaded.github_username, Some("testuser".into()));
         assert_eq!(loaded.model, "claude-opus-4-6");
+        assert_eq!(loaded.max_sessions, 7);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -416,7 +416,7 @@ mod tests {
         // Missing config falls back to AppConfig::default(), whose model tracks the
         // current default (see config.rs) — don't hardcode a model ID here.
         assert_eq!(config.model, crate::config::AppConfig::default().model);
-        assert!(config.github_username.is_none());
+        assert_eq!(config.max_sessions, crate::config::AppConfig::default().max_sessions);
         std::fs::remove_dir_all(&dir).ok();
     }
 
