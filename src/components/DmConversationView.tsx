@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useDmStore } from '../stores/dmStore';
 import { useUIStore } from '../stores/uiStore';
 import { getPubkeyHex } from '../services/nostrService';
-import { useSpeechContext } from '../contexts/SpeechContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { processImageFile } from '../utils/imageUtils';
 import { uploadToBlossom, DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload';
@@ -93,38 +92,13 @@ export default function DmConversationView({ conversationId, isWide }: { convers
     setPendingImage(null);
   };
 
-  const handleDictationResult = useCallback((transcript: string) => {
-    setText(prev => {
-      const separator = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
-      return prev + separator + transcript;
-    });
-  }, []);
-
-  const {
-    available: sttAvailable,
-    isListening,
-    interimTranscript,
-    startListening,
-    stopListening,
-    setInputHandler,
-  } = useSpeechContext();
-
-  // Register DM dictation handler (low priority — voice mode overrides when active)
-  useEffect(() => {
-    setInputHandler(handleDictationResult);
-  }, [setInputHandler, handleDictationResult]);
-
-  const displayValue = interimTranscript
-    ? text + (text && !text.endsWith(' ') ? ' ' : '') + interimTranscript
-    : text;
-
   // Auto-expand textarea upward as content grows
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = '68px';
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 144) + 'px';
     }
-  }, [text, interimTranscript]);
+  }, [text]);
 
   const ownPubkey = useMemo(() => {
     if (nostrConfig.private_key_hex) {
@@ -208,15 +182,6 @@ export default function DmConversationView({ conversationId, isWide }: { convers
     if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice) {
       e.preventDefault();
       handleSend();
-    }
-  };
-
-  const toggleDictation = async () => {
-    if (isListening) {
-      await stopListening();
-    } else {
-      textareaRef.current?.blur();
-      await startListening();
     }
   };
 
@@ -345,29 +310,15 @@ export default function DmConversationView({ conversationId, isWide }: { convers
           <textarea
             ref={textareaRef}
             className="input-textarea"
-            value={isListening ? displayValue : text}
-            onChange={(e) => { if (!isListening) setText(e.target.value); }}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? 'Listening...' : 'Message...'}
+            placeholder="Message..."
             rows={1}
-            readOnly={isListening || sending}
+            readOnly={sending}
           />
 
           <div className="right-controls">
-            {sttAvailable && (
-              <button
-                className={`mic-btn ${isListening ? 'mic-active' : ''}`}
-                onClick={toggleDictation}
-                onPointerDown={e => e.preventDefault()}
-                aria-label={isListening ? 'Stop dictation' : 'Start dictation'}
-                type="button"
-              >
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                </svg>
-              </button>
-            )}
             <button
               className={`send-btn${canSend ? ' send-btn-active' : ''}${sendPop ? ' send-pop' : ''}`}
               onClick={handleSend}

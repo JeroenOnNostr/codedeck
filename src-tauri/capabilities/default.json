@@ -10,12 +10,10 @@
     "opener:default",
     "stronghold:default",
     "store:default",
-    "speech-recognizer:default",
     "deep-link:default",
     "notification:default",
     "background-relay:default",
     "mesh:default",
-    "tts:default",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://*" }]

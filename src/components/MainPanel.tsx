@@ -5,7 +5,6 @@ import { useUIStore } from '../stores/uiStore';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useSwipeToNavigate } from '../hooks/useSwipeToNavigate';
 import { useOrderedSessionIds } from '../hooks/useOrderedSessionIds';
-import { useVoiceMode } from '../hooks/useVoiceMode';
 import { cycleIndex } from '../utils/cycleIndex';
 import { RemoteSessionInfo } from '../types';
 import SessionHeader from './SessionHeader';
@@ -16,13 +15,6 @@ import GsdStageBar from './GsdStageBar';
 import InputBar from './InputBar';
 import DmConversationView from './DmConversationView';
 import ErrorBoundary from './ErrorBoundary';
-
-/** Isolated component so useVoiceMode can sit inside an ErrorBoundary.
- *  If voice mode crashes, the rest of MainPanel keeps working. */
-function VoiceModeRunner() {
-  useVoiceMode();
-  return null;
-}
 
 export default function MainPanel({ isWide }: { isWide: boolean }) {
   const panelMode = useUIStore((s) => s.panelMode);
@@ -189,7 +181,6 @@ export default function MainPanel({ isWide }: { isWide: boolean }) {
         background: 'var(--bg-black)',
       }}
     >
-      <ErrorBoundary><VoiceModeRunner /></ErrorBoundary>
       <ErrorBoundary>
       {panelMode === 'dm' && activeConversationId ? (
         // DM keeps the whole view in the slider (its input slides too, unchanged).

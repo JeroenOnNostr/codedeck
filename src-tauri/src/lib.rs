@@ -618,13 +618,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_speech_recognizer::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_background_relay::init())
         .plugin(tauri_plugin_mesh::init())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_tts::init())
         .setup(|app| {
             // Initialize Stronghold encrypted storage
             let salt_path = app.path()

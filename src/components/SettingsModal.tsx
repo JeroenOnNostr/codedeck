@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useUIStore } from '../stores/uiStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useDmStore } from '../stores/dmStore';
-import { useVoiceModeStore } from '../stores/voiceModeStore';
 import { useQuickPromptStore } from '../stores/quickPromptStore';
 import { AppConfig, AgentMode, EffortLevel, RemoteMachine } from '../types';
 import { parsePrivateKey, getPubkeyHex, parsePublicKey } from '../services/nostrService';
@@ -363,9 +362,6 @@ export default function SettingsModal() {
         {/* Quick Prompts */}
         <QuickPromptsSettings />
 
-        {/* Voice Mode */}
-        <VoiceModeSettings />
-
         {/* Nostr Identity */}
         <div className="modal-section">
           <h3 className="modal-section-title">Nostr Identity</h3>
@@ -580,54 +576,6 @@ export default function SettingsModal() {
           Save
         </button>
       </div>
-    </div>
-  );
-}
-
-function VoiceModeSettings() {
-  const enabled = useVoiceModeStore((s) => s.enabled);
-  const setEnabled = useVoiceModeStore((s) => s.setEnabled);
-  const speechRate = useVoiceModeStore((s) => s.speechRate);
-  const setSpeechRate = useVoiceModeStore((s) => s.setSpeechRate);
-  const autoListen = useVoiceModeStore((s) => s.autoListenAfterRead);
-  const setAutoListen = useVoiceModeStore((s) => s.setAutoListenAfterRead);
-
-  return (
-    <div className="modal-section">
-      <h3 className="modal-section-title">Voice Mode</h3>
-
-      <div className="modal-toggle-row">
-        <span style={{ fontSize: 14 }}>Read actionable messages aloud</span>
-        <button
-          className={`toggle-switch ${enabled ? 'on' : 'off'}`}
-          onClick={() => setEnabled(!enabled)}
-        >
-          <div className="toggle-knob" />
-        </button>
-      </div>
-
-      <div className="modal-toggle-row">
-        <span style={{ fontSize: 14 }}>Auto-listen after reading</span>
-        <button
-          className={`toggle-switch ${autoListen ? 'on' : 'off'}`}
-          onClick={() => setAutoListen(!autoListen)}
-        >
-          <div className="toggle-knob" />
-        </button>
-      </div>
-
-      <label style={{ display: 'block', fontSize: 14, color: 'var(--text-secondary)', marginTop: 8 }}>
-        Speech rate: {speechRate.toFixed(1)}x
-      </label>
-      <input
-        type="range"
-        min={0.8}
-        max={1.5}
-        step={0.1}
-        value={speechRate}
-        onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
-        style={{ width: '100%', marginTop: 4 }}
-      />
     </div>
   );
 }

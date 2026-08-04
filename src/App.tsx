@@ -5,14 +5,12 @@ import { useDmStore } from './stores/dmStore';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { generateSecretKey } from 'nostr-tools/pure';
 import { useQuickPromptStore } from './stores/quickPromptStore';
-import { useVoiceModeStore } from './stores/voiceModeStore';
 import { initNotifications, setAppHidden } from './services/notificationService';
 import { initPingAudio } from './services/pingSound';
 import { hasActiveSubscriptions } from './services/bridgeService';
 import { applyPairingLink } from './services/pairingLink';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke } from '@tauri-apps/api/core';
-import { SpeechProvider } from './contexts/SpeechContext';
 import Sidebar from './components/Sidebar';
 import MainPanel from './components/MainPanel';
 import SettingsModal from './components/SettingsModal';
@@ -41,7 +39,6 @@ export default function App() {
     initNotifications();
     initPingAudio();
     useQuickPromptStore.getState().loadPersisted();
-    useVoiceModeStore.getState().loadPersisted();
 
     // Load persisted DMs first (includes Nostr private key), then init bridge
     useDmStore.getState().loadPersisted().then(() => {
@@ -177,7 +174,6 @@ export default function App() {
   }, []);
 
   return (
-    <SpeechProvider>
     <div style={{
       display: 'flex',
       height: '100%',
@@ -228,6 +224,5 @@ export default function App() {
       <RolePrompt />
       </ErrorBoundary>
     </div>
-    </SpeechProvider>
   );
 }

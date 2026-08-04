@@ -38,12 +38,10 @@ globset = "0.4"
 async-trait = "0.1"
 tauri-plugin-stronghold = "2"
 tauri-plugin-store = "2"
-tauri-plugin-speech-recognizer = { path = "../tauri-plugin-speech-recognizer" }
 tauri-plugin-deep-link = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-background-relay = { path = "../tauri-plugin-background-relay" }
 tauri-plugin-http = "2"
-tauri-plugin-tts = "0.1"
 # Embedded nostr-vpn FIPS mesh as CodeDeck's own Android VpnService (one app on the phone).
 # The mesh engine (nostr-vpn-app-core) is NOT a direct dep of this crate — it is cross-compiled
 # for arm64 and packaged by tauri-plugin-mesh's gradle cargo-ndk task, then loaded via JNI.

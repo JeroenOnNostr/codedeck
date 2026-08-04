@@ -180,17 +180,6 @@
   border-radius: 6px;
 }
 
-.stt-error-hint {
-  margin: 0 8px 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--text-secondary);
-  background: var(--bg-card);
-  border: 1px solid var(--accent-warning, var(--border-medium));
-  border-radius: 6px;
-}
-
 .send-btn {
   /* Roughly 2× the old 32px — matches .input-textarea min-height so it bottom-aligns cleanly,
      making SEND the prominent primary action of the composer. */
@@ -222,37 +211,6 @@
   cursor: default;
 }
 
-/* === Dictation mic button === */
-
-.mic-btn {
-  height: 32px;
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border: 1px solid var(--border-medium);
-  background: var(--bg-card);
-  color: var(--text-muted);
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.mic-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--text-secondary);
-}
-
-.mic-btn.mic-active {
-  background: var(--text-primary);
-  color: var(--bg-black);
-  border-color: var(--text-primary);
-  animation: mic-pulse 1.5s ease-in-out infinite;
-}
-
 /* === Stop/interrupt button === */
 
 .stop-btn {
@@ -277,8 +235,6 @@
   color: var(--error, #ef4444);
   border-color: var(--error, #ef4444);
 }
-
-/* mic-pulse keyframe moved to global.css */
 
 /* === Input bar wrapper (accommodates preview strip above) === */
 

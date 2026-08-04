@@ -77,23 +77,6 @@
   color: var(--text-secondary);
 }
 
-.header-voice {
-  color: var(--text-secondary);
-}
-
-.header-voice.voice-active {
-  color: var(--accent-green, #4ade80);
-}
-
-.header-voice.voice-speaking {
-  animation: voice-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes voice-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 .header-info {
   flex: 1;
   min-width: 0;
