@@ -15,10 +15,13 @@ import {
   QuestionGroupDisplay,
   PermissionRequestDisplay,
 } from '../hooks/useDisplayEntries';
+import { nextAutoScroll } from './outputScroll';
 import '../styles/output.css';
 
 const EMPTY_OUTPUTS: OutputEntry[] = [];
 const DEFAULT_ROW_HEIGHT = 40;
+// Quiet time after the finger lifts before a fling is considered finished
+const SETTLE_MS = 200;
 
 // --- Entry-level components ---
 
@@ -834,18 +837,48 @@ export default function OutputStream({ sessionId }: { sessionId: string }) {
   const [prevCount, setPrevCount] = useState(0);
   const autoScrollRef = useRef(true);
   const displayLenRef = useRef(0);
+  // Finger physically on the glass
+  const touchDownRef = useRef(false);
+  // Finger down OR a fling still coasting — auto-scroll is forbidden for the whole window
+  const interactingRef = useRef(false);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrollTopRef = useRef(0);
+  // The list is mounted conditionally, so its scroller only exists once there are rows
+  const [listEl, setListEl] = useState<HTMLElement | null>(null);
 
-  // Keep refs in sync so the ResizeObserver callback reads fresh values
-  autoScrollRef.current = autoScroll;
   displayLenRef.current = filteredDisplay.length;
+  const hasRows = filteredDisplay.length > 0;
+
+  // autoScrollRef is the source of truth and is written synchronously by the scroll
+  // handler. A ResizeObserver can fire in the same frame as a scroll event, and
+  // mirroring state into the ref during render meant it still read a stale `true`
+  // there — which yanked the viewport to the bottom mid-drag and then re-armed
+  // itself, because landing at the bottom looks like "the user is at the bottom".
+  const setAutoScrollNow = useCallback((next: boolean) => {
+    autoScrollRef.current = next;
+    setAutoScroll((prev) => (prev === next ? prev : next));
+  }, []);
 
   // Guarded scroll-to-end: always reads displayLenRef at call time to avoid stale indices
   const safeScrollToEnd = useCallback(() => {
     const len = displayLenRef.current;
-    if (listRef.current && len > 0) {
-      listRef.current.scrollToRow({ index: len - 1, align: 'end' });
-    }
+    if (!listRef.current || len === 0) return;
+    // Never move the viewport while the user is touching or a fling is still settling
+    if (interactingRef.current) return;
+    listRef.current.scrollToRow({ index: len - 1, align: 'end' });
   }, [listRef]);
+
+  // A fling keeps firing scroll events after the finger lifts; hold the guard until
+  // they stop, otherwise resuming auto-scroll fights the user's own momentum.
+  const scheduleSettle = useCallback(() => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => {
+      settleTimerRef.current = null;
+      interactingRef.current = false;
+      // Landed at the bottom → resume following the stream
+      if (autoScrollRef.current) safeScrollToEnd();
+    }, SETTLE_MS);
+  }, [safeScrollToEnd]);
 
   // Reset scroll state on session switch — ensures new sessions open at the bottom
   useEffect(() => {
@@ -853,11 +886,23 @@ export default function OutputStream({ sessionId }: { sessionId: string }) {
     autoScrollRef.current = true;
     setShowPill(false);
     setPrevCount(0);
+    touchDownRef.current = false;
+    interactingRef.current = false;
+    lastScrollTopRef.current = 0;
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
 
     const t1 = setTimeout(safeScrollToEnd, 50);
     const t2 = setTimeout(safeScrollToEnd, 300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear any pending settle timer on unmount
+  useEffect(() => () => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+  }, []);
 
   // Show "New output" pill when new entries arrive while user is scrolled away
   useEffect(() => {
@@ -878,18 +923,34 @@ export default function OutputStream({ sessionId }: { sessionId: string }) {
     }
   }, [filteredDisplay.length, safeScrollToEnd]);
 
+  // Resolve the list's scroller element. The List is only rendered once there are
+  // rows, so an effect that ran at mount found nothing and — with only stable deps —
+  // never re-ran: sessions that started empty ended up with no scroll listener at
+  // all, leaving auto-scroll latched on forever.
+  useEffect(() => {
+    if (!hasRows) {
+      setListEl(null);
+      return;
+    }
+    const el = listRef.current?.element ?? null;
+    if (el) {
+      setListEl(el);
+      return;
+    }
+    const raf = requestAnimationFrame(() => setListEl(listRef.current?.element ?? null));
+    return () => cancelAnimationFrame(raf);
+  }, [hasRows, listRef]);
+
   // Auto-scroll whenever the inner content grows (new entries, streaming, expand, etc.)
   useEffect(() => {
-    const el = listRef.current?.element;
-    if (!el) return;
-    const inner = el.firstElementChild;
+    const inner = listEl?.firstElementChild;
     if (!inner) return;
     const observer = new ResizeObserver(() => {
       if (autoScrollRef.current) safeScrollToEnd();
     });
     observer.observe(inner);
     return () => observer.disconnect();
-  }, [listRef]);
+  }, [listEl, safeScrollToEnd]);
 
   // Scroll to bottom on initial load (fix for history sessions)
   useEffect(() => {
@@ -906,28 +967,73 @@ export default function OutputStream({ sessionId }: { sessionId: string }) {
   }, [safeScrollToEnd]);
 
   const scrollToBottom = useCallback(() => {
-    safeScrollToEnd();
-    setAutoScroll(true);
+    // Explicit tap on the pill — override the touch guard
+    touchDownRef.current = false;
+    interactingRef.current = false;
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+    setAutoScrollNow(true);
     setShowPill(false);
-  }, [safeScrollToEnd]);
+    safeScrollToEnd();
+  }, [safeScrollToEnd, setAutoScrollNow]);
 
   // Track scroll position to detect manual scroll-away
   const handleNativeScroll = useCallback(() => {
-    const el = listRef.current?.element;
+    const el = listEl;
     if (!el) return;
     const { scrollTop, scrollHeight, clientHeight } = el;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 150;
-    setAutoScroll(atBottom);
-    if (atBottom) setShowPill(false);
-  }, [listRef]);
+    const prevTop = lastScrollTopRef.current;
+    lastScrollTopRef.current = scrollTop;
 
-  // Attach native scroll listener to the list's outer element
+    const next = nextAutoScroll({ scrollTop, scrollHeight, clientHeight }, prevTop, autoScrollRef.current);
+    setAutoScrollNow(next);
+    if (next) setShowPill(false);
+
+    // Momentum still running after the finger lifted → push the settle window out
+    if (!touchDownRef.current && interactingRef.current) scheduleSettle();
+  }, [listEl, setAutoScrollNow, scheduleSettle]);
+
+  // Attach scroll + touch listeners to the list's outer element
   useEffect(() => {
-    const el = listRef.current?.element;
-    if (!el) return;
-    el.addEventListener('scroll', handleNativeScroll);
-    return () => el.removeEventListener('scroll', handleNativeScroll);
-  }, [listRef, handleNativeScroll]);
+    if (!listEl) return;
+
+    const onTouchStart = () => {
+      touchDownRef.current = true;
+      interactingRef.current = true;
+      if (settleTimerRef.current) {
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+      }
+    };
+    const onTouchEnd = () => {
+      touchDownRef.current = false;
+      scheduleSettle();
+    };
+    const onWheel = () => {
+      interactingRef.current = true;
+      scheduleSettle();
+    };
+
+    listEl.addEventListener('scroll', handleNativeScroll, { passive: true });
+    listEl.addEventListener('wheel', onWheel, { passive: true });
+    // Capture on the scroller: only touches that *start* in the output area arm the
+    // guard (typing in the input bar must not).
+    listEl.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    // Release on window instead: virtualization can unmount the row the touch started
+    // on, and a touchend on a detached target never reaches the scroller — which would
+    // strand the guard on and kill auto-scroll for the rest of the session.
+    window.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
+    return () => {
+      listEl.removeEventListener('scroll', handleNativeScroll);
+      listEl.removeEventListener('wheel', onWheel);
+      listEl.removeEventListener('touchstart', onTouchStart, { capture: true });
+      window.removeEventListener('touchend', onTouchEnd, { capture: true });
+      window.removeEventListener('touchcancel', onTouchEnd, { capture: true });
+    };
+  }, [listEl, handleNativeScroll, scheduleSettle]);
 
   const rowProps: RowProps = { display: filteredDisplay, isExpanded, toggleGroup, sessionId };
 
