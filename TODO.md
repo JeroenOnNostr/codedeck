@@ -125,6 +125,24 @@
 
 ## Pairing & settings cleanup
 
+- [ ] **CD-065: the Android manifest's RECORD_AUDIO lives in gitignored `gen/`, so removing it is not
+  durable** — ✅ removed for the `2026.8.4` build, **but the fix is untracked**. CD-062 deleted the
+  speech-recognizer plugin and its manifest, and the commit message claimed `RECORD_AUDIO` would
+  "drop out of the merged manifest on the next android build". **That was wrong** — the permission is
+  not merged from the plugin at all, it is hardcoded at
+  `src-tauri/gen/android/app/src/main/AndroidManifest.xml:4`, and `cargo tauri android build` does
+  not regenerate that file. The first 2026.8.4 APK was built with the permission still in it; caught
+  by `aapt dump permissions` before publishing, hand-removed, rebuilt.
+
+  `.gitignore:9` ignores all of `src-tauri/gen/`, so anyone running `cargo tauri android init` gets
+  the permission back silently and the next release ships it again. Pick one:
+  - commit `src-tauri/gen/android/app/src/main/AndroidManifest.xml` (Tauri v2 treats it as a
+    user-editable file, so this is the intended escape hatch), or
+  - stop ignoring `src-tauri/gen/android/` wholesale and ignore only its build outputs.
+
+  Until then, **`aapt dump permissions` on the APK is a mandatory pre-publish gate**, not an
+  optional check.
+
 - [ ] **CD-064: auto-scroll fought the user mid-drag in the output stream** — ✅ code + tests done,
   **device-verify owed**. Scrolling back through old output would yank the viewport to the newest
   message. Three separate faults: `autoScrollRef` was mirrored from state during render, so a
