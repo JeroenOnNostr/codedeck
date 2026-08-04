@@ -335,3 +335,14 @@
   font-weight: 700;
   flex-shrink: 0;
 }
+
+/* Failure variant — stays put until tapped, since it needs acting on. */
+.pair-toast-error {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.pair-toast-cross {
+  color: #ef4444;
+  font-weight: 700;
+  flex-shrink: 0;
+}

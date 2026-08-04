@@ -3,18 +3,15 @@ import { useUIStore } from './stores/uiStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useDmStore } from './stores/dmStore';
 import { useMediaQuery } from './hooks/useMediaQuery';
-import { parsePublicKey, getPubkeyHex } from './services/nostrService';
 import { generateSecretKey } from 'nostr-tools/pure';
 import { useQuickPromptStore } from './stores/quickPromptStore';
 import { useVoiceModeStore } from './stores/voiceModeStore';
 import { initNotifications, setAppHidden } from './services/notificationService';
 import { initPingAudio } from './services/pingSound';
 import { hasActiveSubscriptions } from './services/bridgeService';
-import { importMeshInvite } from './services/meshClient';
+import { applyPairingLink } from './services/pairingLink';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke } from '@tauri-apps/api/core';
-import * as nip19 from 'nostr-tools/nip19';
-import type { RemoteMachine } from './types';
 import { SpeechProvider } from './contexts/SpeechContext';
 import Sidebar from './components/Sidebar';
 import MainPanel from './components/MainPanel';
@@ -25,91 +22,6 @@ import UndoToast from './components/UndoToast';
 import PairToast from './components/PairToast';
 import RolePrompt from './components/RolePrompt';
 import './styles/global.css';
-
-function handleDeepLink(url: string): void {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'codedeck:') return;
-
-    const npub = parsed.searchParams.get('npub');
-    const relaysParam = parsed.searchParams.get('relays');
-    const machineName = parsed.searchParams.get('machine') || 'Remote';
-    const token = parsed.searchParams.get('token');
-
-    if (!npub) return;
-    const pubkeyHex = parsePublicKey(npub);
-    if (!pubkeyHex) return;
-
-    const relays = relaysParam
-      ? relaysParam.split(',').map(r => decodeURIComponent(r)).filter(r => r.startsWith('wss://') || r.startsWith('ws://'))
-      : ['wss://relay2.descendant.io', 'wss://relay.primal.net', 'wss://relay.nostr.band', 'wss://nos.lol'];
-
-    const machine: RemoteMachine = {
-      hostname: machineName,
-      npub: npub.startsWith('npub1') ? npub : nip19.npubEncode(pubkeyHex),
-      pubkeyHex,
-      relays,
-      connected: false,
-    };
-
-    useSessionStore.getState().addMachine(machine);
-
-    // Apply pairing config to DM store (blossom server + relay merge)
-    const blossomParam = parsed.searchParams.get('blossom');
-    const dmState = useDmStore.getState();
-    const currentConfig = dmState.nostrConfig;
-    const currentRelays = currentConfig.relays;
-    const missingRelays = relays.filter(r => !currentRelays.includes(r));
-    const needsUpdate = missingRelays.length > 0 || (blossomParam && currentConfig.blossomServer !== blossomParam);
-
-    if (needsUpdate) {
-      dmState.updateNostrConfig({
-        ...currentConfig,
-        relays: missingRelays.length > 0 ? [...currentRelays, ...missingRelays] : currentRelays,
-        ...(blossomParam ? { blossomServer: blossomParam } : {}),
-      });
-    }
-
-    // Auto-pairing: if the QR carried a token, send this phone's identity back to
-    // the bridge so it pairs us with no manual npub entry. A key is guaranteed to
-    // exist by the first-run auto-generation in the init effect.
-    if (token && currentConfig.private_key_hex) {
-      try {
-        const ownHex = getPubkeyHex(hexToBytes(currentConfig.private_key_hex));
-        const ownNpub = nip19.npubEncode(ownHex);
-        useSessionStore.getState().pairWithMachine(machine, token, ownNpub, ownHex);
-      } catch (err) {
-        console.warn('[App] Failed to send pair-request:', err);
-      }
-    }
-
-    // One-QR mesh onboarding: if the QR bundled a mesh invite, auto-import it here (single source of
-    // truth — MeshSection only reflects state, it doesn't re-import), then ask the user this device's
-    // role exactly once. Done last so pairing succeeds even if mesh import fails.
-    const meshInvite = parsed.searchParams.get('mesh');
-    const netid = parsed.searchParams.get('netid') || undefined;
-    if (meshInvite) {
-      importMeshInvite(meshInvite)
-        .then((meshImported) => {
-          useUIStore.getState().setRolePrompt({ machine, netid, meshImported });
-        })
-        .catch(() => {
-          // Import failed (e.g. desktop) — still offer the role prompt so the user can proceed.
-          useUIStore.getState().setRolePrompt({ machine, netid, meshImported: false });
-        });
-    }
-  } catch {
-    // Malformed URL — ignore silently
-  }
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -153,12 +65,14 @@ export default function App() {
       dmState.connect();
       dmState.resolveAllProfiles();
 
-      // Handle deep links (codedeck://pair?npub=...&relays=...&machine=...)
+      // Handle deep links (codedeck://pair?npub=...&relays=...&machine=...). Failures
+      // stay silent here — an OS-delivered link the user never typed has no surface to
+      // report into. The paste path in Settings surfaces the same errors to the user.
       getCurrent().then(urls => {
-        if (urls) urls.forEach(handleDeepLink);
+        if (urls) urls.forEach(url => applyPairingLink(url));
       }).catch(() => {});
       onOpenUrl(urls => {
-        urls.forEach(handleDeepLink);
+        urls.forEach(url => applyPairingLink(url));
       }).catch(() => {});
     });
   }, []);

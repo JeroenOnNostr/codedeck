@@ -31,6 +31,16 @@ import { DEFAULT_MODEL } from '../constants/models';
 import { useDmStore } from './dmStore';
 import { useUIStore } from './uiStore';
 
+/**
+ * How long to wait for a `pair-ack` before telling the user nobody answered.
+ * The bridge acks within a round-trip when its window is open, so anything past
+ * this means the window expired or the tab was closed.
+ */
+const PAIR_ACK_TIMEOUT_MS = 20_000;
+
+/** Keyed by machine hostname — the same key `onPairAck` matches on. */
+const pendingPairTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 /** Everything New Session can ask the bridge for. An options object rather than positionals
  *  because the list crossed the point (test/model/cwd/create/GSD) where argument order was the
  *  only thing keeping the two call sites honest. */
@@ -147,7 +157,8 @@ interface SessionStore {
   /** Undo toast state — shown briefly after deleting a remote session. */
   undoToast: { sessionId: string; label: string } | null;
   /** Transient toast shown briefly after a phone auto-pairs with a bridge. */
-  pairToast: { machine: string } | null;
+  /** Pairing outcome banner. `ok: false` carries the reason and does not auto-dismiss. */
+  pairToast: { machine: string; ok: boolean; message?: string } | null;
 
   setActiveSession: (id: string) => void;
   addOutput: (sessionId: string, entry: OutputEntry) => void;
@@ -1281,6 +1292,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     sendPairRequest(machine, ownNpub, ownPubkeyHex, 'Codedeck Phone', token).catch((err) => {
       console.warn('[Store] pair-request publish failed:', err);
     });
+
+    // An *expired* pairing window produces no ack at all — the bridge's subscription
+    // is already torn down, so there is nobody to reject us. Without this timer the
+    // machine just sits disconnected forever with no explanation.
+    const existing = pendingPairTimers.get(machine.hostname);
+    if (existing) clearTimeout(existing);
+    pendingPairTimers.set(machine.hostname, setTimeout(() => {
+      pendingPairTimers.delete(machine.hostname);
+      const m = get().machines.find(x => x.pubkeyHex === machine.pubkeyHex);
+      if (m?.connected) return; // ack landed via another path
+      set({
+        pairToast: {
+          machine: machine.hostname,
+          ok: false,
+          message: `No response from ${machine.hostname} — is the Pair phone tab still open in VSCode?`,
+        },
+      });
+    }, PAIR_ACK_TIMEOUT_MS));
   },
 
   dismissPairToast: () => set({ pairToast: null }),
@@ -2040,13 +2069,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       },
       // onPairAck — bridge confirms (or rejects) an auto-pairing request
       (machineName: string, ok: boolean, reason?: string) => {
+        // Either way the bridge answered, so the no-response timer has done its job.
+        const timer = pendingPairTimers.get(machineName);
+        if (timer) {
+          clearTimeout(timer);
+          pendingPairTimers.delete(machineName);
+        }
+
         if (ok) {
           console.log(`[Store] Auto-paired with ${machineName}`);
           set((state) => ({
             machines: state.machines.map(m =>
               m.hostname === machineName ? { ...m, connected: true } : m,
             ),
-            pairToast: { machine: machineName },
+            pairToast: { machine: machineName, ok: true },
           }));
           // Auto-dismiss the toast after a few seconds
           setTimeout(() => {
@@ -2054,6 +2090,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }, 4000);
         } else {
           console.warn(`[Store] Pairing rejected by ${machineName}: ${reason ?? 'unknown'}`);
+          // A rejection used to be console-only, which made a stale pairing link look
+          // identical to a working one that simply hadn't connected yet.
+          set({
+            pairToast: {
+              machine: machineName,
+              ok: false,
+              message: reason === 'bad-token'
+                ? 'Pairing link expired — generate a new one in VSCode.'
+                : `${machineName} rejected pairing${reason ? ` (${reason})` : ''}.`,
+            },
+          });
         }
       },
       // onUsage — subscription usage snapshot pushed by the bridge (on request or heartbeat)

@@ -8,6 +8,7 @@ import { AppConfig, AgentMode, EffortLevel, RemoteMachine } from '../types';
 import { parsePrivateKey, getPubkeyHex, parsePublicKey } from '../services/nostrService';
 import { api } from '../ipc/tauri';
 import { sendSetCredentials } from '../services/bridgeService';
+import { applyPairingLink, extractPairingUrl } from '../services/pairingLink';
 import { MODELS, DEFAULT_MODEL } from '../constants/models';
 import * as nip19 from 'nostr-tools/nip19';
 import { DEFAULT_BLOSSOM_SERVER } from '../utils/blossomUpload';
@@ -64,6 +65,10 @@ export default function SettingsModal() {
   const [newMachineNpub, setNewMachineNpub] = useState('');
   const [newMachineName, setNewMachineName] = useState('');
   const [machineError, setMachineError] = useState('');
+  const [showAdvancedMachine, setShowAdvancedMachine] = useState(false);
+  const [pairingLink, setPairingLink] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const [linkNote, setLinkNote] = useState('');
   const [showDiscardWarning, setShowDiscardWarning] = useState(false);
 
   const isDirty = useMemo(() => {
@@ -73,8 +78,9 @@ export default function SettingsModal() {
     const relayChanged = relayList !== nostrConfig.relays.join('\n');
     const blossomChanged = blossomServer !== (nostrConfig.blossomServer || '');
     const hasPendingMachine = newMachineNpub.trim().length > 0;
-    return configChanged || nostrKeyChanged || relayChanged || blossomChanged || hasPendingMachine;
-  }, [local, config, nostrKey, nostrConfig.private_key_hex, relayList, nostrConfig.relays, blossomServer, nostrConfig.blossomServer, newMachineNpub]);
+    const hasPendingLink = pairingLink.trim().length > 0;
+    return configChanged || nostrKeyChanged || relayChanged || blossomChanged || hasPendingMachine || hasPendingLink;
+  }, [local, config, nostrKey, nostrConfig.private_key_hex, relayList, nostrConfig.relays, blossomServer, nostrConfig.blossomServer, newMachineNpub, pairingLink]);
 
   const handleClose = useCallback(() => {
     if (isDirty) {
@@ -130,9 +136,14 @@ export default function SettingsModal() {
     return nip19.npubEncode(hex);
   }, [nostrKey]);
 
-  const handleSave = async () => {
-    await updateConfig(local);
-
+  /**
+   * Persist the Nostr identity/relay fields and re-init the bridge with them.
+   *
+   * Shared by Save and Link machine: a pair-request is published by the bridge
+   * service, so a freshly-typed nsec has to be committed *before* a pairing link
+   * is applied or the request goes out signed by the old key (or not at all).
+   */
+  const commitNostrConfig = useCallback(() => {
     // Parse and save nostr config — store as hex internally
     const sk = nostrKey ? parsePrivateKey(nostrKey) : null;
     const privateKeyHex = sk
@@ -154,6 +165,53 @@ export default function SettingsModal() {
     if (privateKeyHex) {
       initBridgeService(privateKeyHex);
     }
+
+    return { privateKeyHex, effectiveRelays };
+  }, [nostrKey, relayList, blossomServer, updateNostrConfig, initBridgeService]);
+
+  /** Paste a `codedeck://pair?...` link from the bridge — the no-camera pairing path. */
+  const handleLinkMachine = useCallback(() => {
+    setLinkError('');
+    setLinkNote('');
+
+    const url = extractPairingUrl(pairingLink);
+    if (!url) {
+      setLinkError('Not a Codedeck pairing link.');
+      return;
+    }
+
+    commitNostrConfig();
+    const result = applyPairingLink(url);
+    if (!result.ok) {
+      setLinkError(result.error);
+      return;
+    }
+
+    setPairingLink('');
+    setLinkNote(
+      result.pairRequestSent
+        ? `Pairing with ${result.machine.hostname}…`
+        : result.note ?? '',
+    );
+  }, [pairingLink, commitNostrConfig]);
+
+  const handlePasteLink = useCallback(async () => {
+    setLinkError('');
+    setLinkNote('');
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) setPairingLink(text.trim());
+    } catch {
+      // Clipboard read is permission-gated on some platforms — the field still
+      // accepts a long-press paste, so this is a hint, not a failure.
+      setLinkError('Clipboard unavailable — long-press the field and paste manually.');
+    }
+  }, []);
+
+  const handleSave = async () => {
+    await updateConfig(local);
+
+    const { effectiveRelays } = commitNostrConfig();
 
     // Auto-add pending machine if the npub field has a value
     if (newMachineNpub.trim()) {
@@ -363,7 +421,8 @@ export default function SettingsModal() {
         <div className="modal-section">
           <h3 className="modal-section-title">Remote Machines</h3>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
-            Pair with machines running the Codedeck Bridge VSCode extension to control Claude Code remotely.
+            Pair with machines running the Codedeck Bridge VSCode extension to control Claude Code
+            remotely. Scan the bridge's QR code, or paste its pairing link below.
           </p>
 
           {machines.map((m) => (
@@ -408,6 +467,51 @@ export default function SettingsModal() {
           )}
 
           <div style={{ marginTop: 12 }}>
+            <label className="modal-label">Pairing link</label>
+            <textarea
+              className="modal-input"
+              value={pairingLink}
+              onChange={(e) => { setPairingLink(e.target.value); setLinkError(''); setLinkNote(''); }}
+              placeholder="codedeck://pair?npub=..."
+              style={{ height: 64, resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 0 0' }}>
+              In VSCode run <strong>Codedeck: Pair phone</strong>, click <strong>Copy pairing link</strong>,
+              send it to this device and paste it here. No camera needed.
+            </div>
+            {linkError && <div style={{ color: '#ef4444', fontSize: 11, padding: '4px 0' }}>{linkError}</div>}
+            {linkNote && <div style={{ color: 'var(--text-secondary)', fontSize: 11, padding: '4px 0' }}>{linkNote}</div>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="show-hide-btn" onClick={handlePasteLink}>
+                Paste
+              </button>
+              <button
+                className="show-hide-btn"
+                onClick={handleLinkMachine}
+                disabled={!pairingLink.trim()}
+              >
+                Link machine
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <button
+              className="show-hide-btn"
+              onClick={() => setShowAdvancedMachine(!showAdvancedMachine)}
+              style={{ fontSize: 11 }}
+            >
+              {showAdvancedMachine ? '▾' : '▸'} Advanced — add by npub
+            </button>
+          </div>
+
+          {showAdvancedMachine && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '0 0 8px' }}>
+              Adding a bare npub registers the machine but cannot pair it — the bridge won't
+              see this phone until you also paste this phone's npub into the bridge's
+              Manual Pairing form. Prefer the pairing link above.
+            </div>
             <label className="modal-label">Bridge npub</label>
             <input
               className="modal-input"
@@ -453,6 +557,7 @@ export default function SettingsModal() {
               + Add Machine
             </button>
           </div>
+          )}
         </div>
 
         {/* Mesh (nostr-vpn) — remote on-device testing */}
