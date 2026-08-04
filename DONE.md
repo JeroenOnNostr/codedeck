@@ -1,5 +1,45 @@
 # Done — Codedeck
 
+## Zapstore release 2026.8.4 — paste-to-pair, voice mode and auth removed (2026-08-04)
+
+- [x] **Published CodeDeck `2026.8.4` to Zapstore** — ships **CD-061** (paste the bridge's pairing
+  link instead of scanning it, so a phone with no camera can pair at all, plus visible pairing
+  failure), **CD-062** (voice mode removed entirely), **CD-063** (Authentication section removed,
+  Stronghold with it), **CD-064** (auto-scroll no longer fights the user mid-drag) and **CD-060**
+  (folder picker is a `<select>`). versionCode `20260804`, cert `c5d0cba4…fbc5`, arm64-v8a only.
+  Version matches the wall clock again — the previous three releases ran a day or two ahead to keep
+  YYYYMMDD codes monotonic across same-day re-releases, and four days of gap absorbed that drift.
+
+  **The APK was rebuilt mid-release and the first one discarded.** `aapt dump permissions` on build
+  #1 still showed `android.permission.RECORD_AUDIO`, despite CD-062 having deleted the
+  speech-recognizer plugin — the permission is **not** merged in from the plugin, it is hardcoded at
+  `src-tauri/gen/android/app/src/main/AndroidManifest.xml:4`, and `cargo tauri android build` does
+  not regenerate that file. The CD-062 commit message claims otherwise and is wrong; filed as
+  **CD-065**, because `.gitignore:9` ignores all of `src-tauri/gen/` so the hand-fix will not
+  survive a `cargo tauri android init`. Build #2 verified clean: **no microphone permission**.
+
+  Content verified by chain rather than by filename (an APK named for a version has predated its own
+  commit here before): the freshly built `dist/assets/index-*.js` carries `Pairing link` /
+  `Link machine` / `Pairing link expired` and carries **neither** `Voice Mode` nor
+  `Anthropic API Key`; `dist/` (17:17:16) predates `libcodedeck_lib.so` (17:17:31), so the `.so` was
+  built from it; and the APK's `lib/arm64-v8a/libcodedeck_lib.so` is `cmp`-identical to that `.so`.
+  (`strings` on the `.so` finds nothing — Tauri stores the web assets compressed, which is why the
+  check runs against `dist/`.)
+
+  Signer proven **before** publishing (`zsp publish -q zapstore.yaml --offline` → all three events
+  `f07e0b1af066b483…c367`, the listing owner; a mismatch forks the listing instead of updating it).
+  The kind-3063 event's `x`, `size`, `version_code` and `apk_certificate_hash` were checked against
+  the local artifact first. Events 32267 / 30063 / 3063 landed `2026-08-04T16:22:11Z`; CDN blob
+  `92d869e5…1f90` fetched back and `cmp`-verified byte-identical. `zapstore.yaml` temp-injection
+  (`version` / `release_source` / `release_notes`) reverted.
+
+  Tag `codedeck-v2026.08.04`, pushed with `feat/gsd-stage-strip`. Companion **Codedeck Bridge
+  `2026.8.4`** published as a GitHub release (CDB-039 — the Copy pairing link button CD-061 depends
+  on); its `.vsix` was likewise verified by content, `PAIRING_WINDOW_MS = 6e5`. Note the prior bridge
+  release `v2026.7.311` had shipped a `.vsix` built 52 minutes *before* CDB-039 landed, which is why
+  this is a new version rather than a re-tag. `main` remains 25 commits behind at `2026.07.25` —
+  every release since has shipped from `feat/gsd-stage-strip`. (2026-08-04)
+
 ## Zapstore release 2026.07.31 — GSD project kickoff + real folder picker (2026-07-30)
 
 - [x] **Published CodeDeck `2026.7.31` to Zapstore** — ships **CD-058** (New Session opens with
