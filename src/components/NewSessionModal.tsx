@@ -27,6 +27,25 @@ export function orderProjectFolders(folders: string[], activeProjects: string[])
   ];
 }
 
+/**
+ * The Project folder picker's "none of these" option (CD-060).
+ *
+ * A sentinel rather than a magic string because every other value in the select is a real folder
+ * name, and a folder called `Other` is a name someone will eventually use. `\0` can't occur in one.
+ */
+export const PROJECT_FOLDER_CUSTOM = '\0custom';
+
+/**
+ * The picker's selection + whatever was typed under it → the `cwd` actually sent (CD-060).
+ *
+ * Empty is the workspace root, which is what every session got before CDB-033 and still the
+ * default. The custom branch is what keeps CD-058 alive: typing a folder name that does not exist
+ * yet is how a new project gets started from the phone, and a select alone could never express it.
+ */
+export function resolveProjectFolder(selection: string, typed: string): string {
+  return selection === PROJECT_FOLDER_CUSTOM ? typed.trim() : selection;
+}
+
 /** Folder name → a path the bridge will accept: no separators, no traversal, no leading dots. */
 export function sanitizeProjectFolder(raw: string): string {
   return raw
@@ -58,7 +77,9 @@ export default function NewSessionModal() {
   const [testSession, setTestSession] = useState(false);
   const [model, setModel] = useState<string>(defaultModel || DEFAULT_MODEL);
   // CDB-033. Empty = the workspace root, which is what every session used to get unconditionally.
+  // CD-060: this now holds only a *typed* name — what the picker selected lives in folderSelection.
   const [projectDir, setProjectDir] = useState('');
+  const [folderSelection, setFolderSelection] = useState('');
   // When the folder doesn't exist yet, the bridge creates and `git init`s it — that is what makes
   // "start a new GSD project from the phone" possible rather than only opening existing ones.
   const [createDir, setCreateDir] = useState(false);
@@ -91,7 +112,11 @@ export default function NewSessionModal() {
     const folderOptions = orderProjectFolders(workspaceFolders, projects);
 
     // CDB-033 landed in bridge protocol v8. Older bridges drop `cwd` without a word.
-    const supportsProjectDir = (machineProtocolVersion[machine.pubkeyHex] ?? 0) >= 8;
+    const protocolVersion = machineProtocolVersion[machine.pubkeyHex] ?? 0;
+    const supportsProjectDir = protocolVersion >= 8;
+    // CDB-035 (v9) is what puts real folders in the picker. Between v8 and v9 the field works but
+    // has nothing to offer, and the reason is on the laptop, not the phone (CD-060).
+    const bridgeCannotListFolders = supportsProjectDir && protocolVersion < 9;
 
     // Don't offer a GSD flow on a laptop that has no GSD — the session would open fine and then
     // `/gsd-new-project` would come back as an unknown command. Only hide it on an actual "no":
@@ -105,6 +130,15 @@ export default function NewSessionModal() {
     const gsdMode = gsdProject && canOfferGsd;
 
     const gsdFolder = sanitizeProjectFolder(gsdName);
+
+    // CD-060. With something to choose from, the field is a select (a native picker on a phone)
+    // and `projectDir` only matters under "Other". With nothing — a v8 bridge on a machine with no
+    // sessions yet, or a v9 one whose scan failed — a select offering only "workspace root" and
+    // "Other" would be a worse field than the free text it replaced, so that stays.
+    const hasFolderList = folderOptions.length > 0;
+    const chosenDir = hasFolderList
+      ? resolveProjectFolder(folderSelection, projectDir)
+      : projectDir.trim();
 
     const handleRemoteCreate = () => {
       // Open a usable session view instantly; the real session reconciles in the
@@ -122,12 +156,11 @@ export default function NewSessionModal() {
         close();
         return;
       }
-      const dir = projectDir.trim();
       startOptimisticRemoteSession(machine, {
         testSession,
         model,
-        cwd: dir || undefined,
-        createCwd: dir ? createDir : false,
+        cwd: chosenDir || undefined,
+        createCwd: chosenDir ? createDir : false,
       });
       close();
     };
@@ -135,9 +168,8 @@ export default function NewSessionModal() {
     // Only meaningful once a folder is named, and only offered if the bridge can honour it.
     // With a real folder list (v9+) the offer narrows to names that aren't in it: for a folder the
     // bridge just told us exists, "create it if it doesn't exist" is a question about nothing.
-    const namedFolder = projectDir.trim();
-    const isNewProject = supportsProjectDir && namedFolder.length > 0
-      && (workspaceFolders.length === 0 || !workspaceFolders.includes(namedFolder));
+    const isNewProject = supportsProjectDir && chosenDir.length > 0
+      && (workspaceFolders.length === 0 || !workspaceFolders.includes(chosenDir));
 
     return (
       <div className="modal-overlay bottom-sheet" onClick={close}>
@@ -232,19 +264,48 @@ export default function NewSessionModal() {
               {supportsProjectDir && (
                 <>
                   <label className="modal-label">Project folder</label>
-                  <input
-                    className="modal-input"
-                    value={projectDir}
-                    onChange={(e) => setProjectDir(e.target.value)}
-                    placeholder="workspace root"
-                    list="project-dirs"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                  <datalist id="project-dirs">
-                    {folderOptions.map((p) => <option key={p} value={p} />)}
-                  </datalist>
+                  {/* A select, not the `<input list>` this used to be (CD-060): the WebView renders
+                      a datalist's suggestions as a popup that paints over the label above it, and
+                      it only ever showed what the typed prefix matched — a picker you have to
+                      already know the answer to use. A select is the phone's own full-screen
+                      picker, and every folder is in it before a key is pressed. */}
+                  {hasFolderList ? (
+                    <>
+                      <select
+                        className="modal-input"
+                        value={folderSelection}
+                        onChange={(e) => setFolderSelection(e.target.value)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <option value="">workspace root</option>
+                        {folderOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                        <option value={PROJECT_FOLDER_CUSTOM}>Other — type a folder name…</option>
+                      </select>
+                      {folderSelection === PROJECT_FOLDER_CUSTOM && (
+                        <input
+                          className="modal-input"
+                          value={projectDir}
+                          onChange={(e) => setProjectDir(e.target.value)}
+                          placeholder="new-project"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          autoFocus
+                          style={{ marginTop: 8 }}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <input
+                      className="modal-input"
+                      value={projectDir}
+                      onChange={(e) => setProjectDir(e.target.value)}
+                      placeholder="workspace root"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                  )}
                   {isNewProject && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
                       <input type="checkbox" checked={createDir} onChange={(e) => setCreateDir(e.target.checked)} />
@@ -257,8 +318,14 @@ export default function NewSessionModal() {
                 {!supportsProjectDir
                   ? `Opens a new Claude Code terminal in the VSCode workspace. Session name and project are assigned automatically. Update the bridge to choose a project folder for the session.`
                   : workspaceFolders.length > 0
-                    ? `Opens a new Claude Code terminal in the VSCode workspace. Tap the field to pick from its ${workspaceFolders.length} project folders, or leave it blank for the workspace root — tools that read the session's directory, GSD above all, then see that one project instead of the whole workspace. Session name is assigned automatically.`
-                    : `Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the workspace root, or name a subdirectory to root the session in one project — tools that read the session's directory, GSD above all, then see that project instead of the whole workspace. Session name is assigned automatically.`}
+                    ? `Opens a new Claude Code terminal in the VSCode workspace. Pick one of its ${workspaceFolders.length} project folders, or “Other” to name one that doesn't exist yet — tools that read the session's directory, GSD above all, then see that one project instead of the whole workspace. Session name is assigned automatically.`
+                    /* A bridge old enough to honour `cwd` (v8) but not to list the workspace (v9)
+                       used to be indistinguishable from a workspace with no projects in it: the
+                       picker just quietly had nothing in it and the hint explained neither. Naming
+                       the cause is the difference between a one-line fix and a hunt (CD-060). */
+                    : bridgeCannotListFolders
+                      ? `Opens a new Claude Code terminal in the VSCode workspace. This machine's bridge is too old to list the workspace's project folders — update the VSCode extension to pick from them. Until then, name the folder yourself (“Other”, where the field offers it) to root the session in one project, or leave it at the workspace root.`
+                      : `Opens a new Claude Code terminal in the VSCode workspace. Leave the folder blank to use the workspace root, or name a subdirectory to root the session in one project — tools that read the session's directory, GSD above all, then see that project instead of the whole workspace. Session name is assigned automatically.`}
               </p>
 
               <label className="modal-label">Model</label>

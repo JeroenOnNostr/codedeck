@@ -6,7 +6,12 @@ import {
   fireGsdKickoff,
   cancelGsdKickoff,
 } from '../stores/sessionStore';
-import { sanitizeProjectFolder, orderProjectFolders } from '../components/NewSessionModal';
+import {
+  sanitizeProjectFolder,
+  orderProjectFolders,
+  resolveProjectFolder,
+  PROJECT_FOLDER_CUSTOM,
+} from '../components/NewSessionModal';
 import { OutputEntry, RemoteMachine, RemoteSessionInfo } from '../types';
 
 function makeEntry(overrides: Partial<OutputEntry> = {}): OutputEntry {
@@ -551,6 +556,41 @@ describe('orderProjectFolders', () => {
   it('falls back to the session-derived list when the bridge sent none (pre-v9)', () => {
     expect(orderProjectFolders([], ['codedeck', 'codedeck'])).toEqual(['codedeck']);
     expect(orderProjectFolders([], [])).toEqual([]);
+  });
+});
+
+/**
+ * CD-060 — the picker became a select, so what gets sent as `cwd` is no longer just the field's
+ * text: it is the selection, except under "Other", where it is the text typed beneath it.
+ */
+describe('resolveProjectFolder', () => {
+  it('sends the folder that was picked', () => {
+    expect(resolveProjectFolder('yenn', '')).toBe('yenn');
+  });
+
+  it('keeps a nested folder intact', () => {
+    // The bridge's own listing contains these and resolves them relative to the workspace root —
+    // flattening the separator here would name a folder that doesn't exist and silently root the
+    // session at the root instead.
+    expect(resolveProjectFolder('nostr-relays/rocket-relay', '')).toBe('nostr-relays/rocket-relay');
+  });
+
+  it('treats the empty selection as the workspace root', () => {
+    expect(resolveProjectFolder('', '')).toBe('');
+  });
+
+  it('sends the typed name under "Other" — this is how CD-058 starts a new project', () => {
+    expect(resolveProjectFolder(PROJECT_FOLDER_CUSTOM, '  my-new-app ')).toBe('my-new-app');
+  });
+
+  it('falls back to the workspace root when "Other" is chosen but nothing is typed', () => {
+    expect(resolveProjectFolder(PROJECT_FOLDER_CUSTOM, '   ')).toBe('');
+  });
+
+  it('ignores stale typed text once a real folder is picked', () => {
+    // Switching from "Other" back to a listed folder must not send the abandoned draft name, which
+    // would create a directory nobody asked for (the create checkbox is keyed off this value).
+    expect(resolveProjectFolder('atna', 'half-typed-name')).toBe('atna');
   });
 });
 
